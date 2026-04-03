@@ -335,7 +335,7 @@ The CRD design must split generation concerns (transaction owner) from verificat
 #### CRD 1: `TxTokenConfig` — Platform Admin, cluster-scoped
 
 ```yaml
-apiVersion: txtoken.aks.io/v1alpha1
+apiVersion: kontxt.io/v1alpha1
 kind: TxTokenConfig
 metadata:
   name: default                  # cluster singleton
@@ -392,7 +392,7 @@ status:
 #### CRD 2: `TransactionType` — Transaction Owner, namespace-scoped
 
 ```yaml
-apiVersion: txtoken.aks.io/v1alpha1
+apiVersion: kontxt.io/v1alpha1
 kind: TransactionType
 metadata:
   name: analyze-dataset
@@ -468,7 +468,7 @@ status:
 #### CRD 3: `ServiceTokenRequirement` — Service Owner, namespace-scoped
 
 ```yaml
-apiVersion: txtoken.aks.io/v1alpha1
+apiVersion: kontxt.io/v1alpha1
 kind: ServiceTokenRequirement
 metadata:
   name: storage-service-reqs
@@ -530,7 +530,7 @@ status:
 #### CRD 4: `TokenPolicy` — Security Admin, cluster-scoped
 
 ```yaml
-apiVersion: txtoken.aks.io/v1alpha1
+apiVersion: kontxt.io/v1alpha1
 kind: TokenPolicy
 metadata:
   name: default-policy
@@ -538,13 +538,13 @@ spec:
   # Which namespaces can define TransactionTypes (generate TxTokens)
   authorizedTransactionNamespaces:
     matchLabels:
-      txtoken.aks.io/entry-allowed: "true"
+      kontxt.io/entry-allowed: "true"
 
   # Which service accounts can request TxTokens from the TTS
   authorizedRequesters:
     - namespaceSelector:
         matchLabels:
-          txtoken.aks.io/entry-allowed: "true"
+          kontxt.io/entry-allowed: "true"
       serviceAccountNames:
         - "agent-*"
         - "api-gateway"
@@ -592,7 +592,7 @@ spec:
     failurePolicy: "Deny"          # Deny or Allow on webhook failure
 ---
 # Namespace-specific policy override (more restrictive than default)
-apiVersion: txtoken.aks.io/v1alpha1
+apiVersion: kontxt.io/v1alpha1
 kind: TokenPolicy
 metadata:
   name: team-beta-strict
@@ -957,7 +957,7 @@ TransactionType                    ServiceTokenRequirement
 
    ```yaml
    # Service owner in team-beta defines:
-   apiVersion: txtoken.aks.io/v1alpha1
+   apiVersion: kontxt.io/v1alpha1
    kind: ServiceTokenRequirement
    metadata:
      name: storage-svc-reqs
