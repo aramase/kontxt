@@ -141,33 +141,56 @@ The CRD design must split generation concerns (transaction owner) from verificat
    - **`request_details`** (JSON) — Request-specific parameters that become the `tctx` claim. The TTS extracts and optionally enriches these into immutable authorization details. Example: `{"action":"BUY","ticker":"MSFT","quantity":"100"}`.
    - **`request_context`** (JSON) — Environmental context that becomes the `rctx` claim. Example: `{"req_ip":"69.151.72.123","authn":"urn:ietf:rfc:6749"}`.
 
-2. **Pluggable IdP validation:**
-   - Configuration-driven, not code-driven. A YAML config specifies one or more IdP backends:
+2. **Pluggable IdP validation** (inspired by [KEP-3331 Structured Authentication Configuration](https://github.com/kubernetes/enhancements/blob/master/keps/sig-auth/3331-structured-authentication-configuration/README.md), GA in K8s 1.34):
+   - Configuration-driven, not code-driven. An ordered list of JWT authenticators, each with its own issuer, audiences, validation rules, and claim mappings:
      ```yaml
      subjectTokens:
-       - type: oidc
-         name: "keycloak"
-         providerURL: "https://keycloak.example.com/realms/my-realm"
-         clientId: "my-client"
-         subjectField: "email"      # which claim becomes TxToken `sub`
-       - type: oidc
-         name: "entra"
-         providerURL: "https://login.microsoftonline.com/{tenant}/v2.0"
-         clientId: "{app-id}"
-         subjectField: "oid"
-       - type: self-signed
-         name: "internal"
-         jwksEndpoint: "https://internal-service/.well-known/jwks.json"
+       # Each entry is a JWT authenticator — first matching issuer wins
+       - issuer:
+           url: "https://login.microsoftonline.com/{tenant}/v2.0"
+           audiences: ["{app-id}"]
+           audienceMatchPolicy: MatchAny
+         claimValidationRules:
+           - expression: 'claims.tid == "{tenant-id}"'
+             message: "token must be from the expected tenant"
+         claimMappings:
+           subject:
+             expression: 'claims.oid'   # which claim becomes TxToken `sub`
+           extra:
+             - key: 'tenant'
+               valueExpression: 'claims.tid'
+             - key: 'name'
+               valueExpression: 'claims.name'
+
+       - issuer:
+           url: "https://keycloak.example.com/realms/my-realm"
+           audiences: ["my-client"]
+         claimMappings:
+           subject:
+             claim: "email"             # simple claim reference (no CEL)
+
+       - issuer:
+           # Kubernetes SA tokens — for internal workloads
+           url: "https://oidc.prod-aks.azure.com/{cluster-id}"
+           discoveryURL: "https://oidc.prod-aks.azure.com/{cluster-id}/.well-known/openid-configuration"
+           audiences: ["kontxt-tts"]
+         claimMappings:
+           subject:
+             claim: "sub"               # system:serviceaccount:<ns>:<sa>
      ```
-   - The TTS routes to the correct validator based on the `subject_token_type` parameter and token introspection (issuer matching).
-   - New IdP types can be added by implementing a `SubjectTokenValidator` interface:
+   - **Issuer matching:** When a subject token arrives, the TTS decodes the `iss` claim (without verification) and routes to the matching authenticator. Each authenticator then performs full validation (signature via OIDC discovery JWKS, expiration, audience, claim validation rules).
+   - **CEL claim validation rules:** Evaluated against raw JWT claims before mapping. If any rule returns `false`, the token is rejected with the rule's message. Same CEL environment as KEP-3331 — `claims` variable as a dynamic map.
+   - **CEL claim mappings:** The `claimMappings.subject` field determines which claim becomes the TxToken's `sub`. Supports either a simple `claim` name or a CEL `expression`. The `extra` mappings carry additional identity attributes from the IdP token into the TTS's context.
+   - **Discovery URL override:** Separates the logical issuer identity (`url`, must match `iss` claim) from where to actually fetch OIDC metadata (`discoveryURL`). Supports scenarios where the issuer is not directly reachable from the TTS (e.g., in-cluster OIDC issuers).
+   - New authenticator types can be added by implementing a `JWTAuthenticator` interface:
      ```go
-     type SubjectTokenValidator interface {
-         Validate(ctx context.Context, token string) (*SubjectInfo, error)
-         MatchesToken(token string) bool
+     type JWTAuthenticator interface {
+         // Matches returns true if this authenticator handles the given issuer
+         Matches(issuer string) bool
+         // Authenticate validates the token and returns the subject info
+         Authenticate(ctx context.Context, token string) (*SubjectInfo, error)
      }
      ```
-   - Built-in validators: OIDC (any provider with `.well-known/openid-configuration`), Kubernetes SA token (validated against the cluster OIDC issuer). Self-signed JWT and unsigned JSON available for dev/test.
 
 3. **TxToken JWT format** (all fields per draft-ietf-oauth-transaction-tokens-08):
 
@@ -219,8 +242,6 @@ The CRD design must split generation concerns (transaction owner) from verificat
    | Agent example | `{"tool":"csv-analyzer","dataset":"ds-1234","classification":"public"}` | `{"req_ip":"10.0.0.42","authn":"oidc"}` |
 
    **Why `tctx` matters for agents:** Without `tctx`, a downstream service only knows "user X has scope read:datasets." With `tctx`, it knows "user X is reading dataset-123 which is classified public via the csv-analyzer tool." That's the difference between coarse RBAC and fine-grained, request-specific authorization. The TTS enrichment capability (computing `classification: public` by looking up the dataset) means downstream services don't each need to re-derive this — it's sealed in the token.
-
-   > **Note:** Tokenetes uses `azd` instead of `tctx` and adds a non-spec `purp` claim. Our POC uses the spec's claim names (`tctx`, `rctx`) for compliance. Purpose can be encoded as a field within `tctx`.
 
 4. **Workload authentication to TTS:**
    - The TTS must know _which workload_ is requesting the token. This is separate from the subject token (which identifies the _user_).
@@ -315,7 +336,14 @@ The CRD design must split generation concerns (transaction owner) from verificat
    - Demonstrates end-to-end transaction correlation using the `txn` claim.
    - Demonstrates that `tctx` authorization details (including TTS-computed fields) are available at every hop for both authorization and audit.
 
-**Deliverable:** A Go module (`github.com/Azure/aks-txtoken`) with verifier, middleware, and propagation helpers. A 3-service demo app deployed on AKS.
+**Deliverable:** A Go SDK (`github.com/aramase/kontxt/sdk`) with three packages:
+- **`sdk/tts`** — TTS client for RFC 8693 token exchange (obtain TxTokens)
+- **`sdk/verify`** — TxToken JWT verifier (signature, expiration, audience, claims)
+- **`sdk/middleware`** — HTTP server middleware (verify incoming TxTokens) + HTTP client middleware (propagate `Txn-Token` header on outbound requests)
+
+This SDK is the **standalone deployment model** — agents that don't use AgentGateway or Istio can `go get github.com/aramase/kontxt/sdk` and interact with the TTS directly. It's also the library that the ext auth adapter uses internally.
+
+A 3-service demo app deployed on Kubernetes demonstrating the end-to-end flow.
 
 **Validation:**
 - Send a request to Service A with a valid OIDC access token. Verify that the same `txn` value appears in all three services' logs.
@@ -345,27 +373,37 @@ spec:
   trustDomain: "aks-cluster-1.contoso.com"
   issuer: "https://tts.platform-system.svc.cluster.local"
 
-  # Pluggable IdP configuration — which subject tokens the TTS accepts
+  # Pluggable IdP configuration (inspired by KEP-3331 Structured Authentication Configuration)
+  # Ordered list of JWT authenticators — first matching issuer wins.
   subjectTokens:
-    - type: oidc
-      name: entra
-      providerURL: "https://login.microsoftonline.com/{tenant}/v2.0"
-      clientId: "{app-id}"
-      subjectField: "oid"           # OIDC claim → TxToken `sub`
-    - type: oidc
-      name: keycloak
-      providerURL: "https://keycloak.example.com/realms/agents"
-      clientId: "agent-client"
-      subjectField: "email"
-    - type: self-signed
-      name: internal
-      jwksEndpoint: "https://internal-issuer/.well-known/jwks.json"
-    # Kubernetes SA tokens — for internal workloads (CronJobs, agents)
-    # that have no external user and use their SA token as identity.
-    # Validated against the cluster's OIDC issuer.
-    - type: kubernetes-sa
-      name: cluster-internal
-      issuer: "https://oidc.prod-aks.azure.com/{cluster-id}"
+    - issuer:
+        url: "https://login.microsoftonline.com/{tenant}/v2.0"
+        audiences: ["{app-id}"]
+        audienceMatchPolicy: MatchAny
+      claimValidationRules:
+        - expression: 'claims.tid == "{tenant-id}"'
+          message: "token must be from the expected tenant"
+      claimMappings:
+        subject:
+          expression: 'claims.oid'
+        extra:
+          - key: 'tenant'
+            valueExpression: 'claims.tid'
+
+    - issuer:
+        url: "https://keycloak.example.com/realms/agents"
+        audiences: ["agent-client"]
+      claimMappings:
+        subject:
+          claim: "email"
+
+    - issuer:
+        # Kubernetes SA tokens — for internal workloads
+        url: "https://oidc.prod-aks.azure.com/{cluster-id}"
+        audiences: ["kontxt-tts"]
+      claimMappings:
+        subject:
+          claim: "sub"             # system:serviceaccount:<ns>:<sa>
 
   # How the TTS authenticates the requesting workload
   workloadAuth:

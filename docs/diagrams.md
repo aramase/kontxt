@@ -85,27 +85,23 @@ sequenceDiagram
     TTS-->>Caller: TxToken JWT<br/>{typ:txntoken+jwt, txn:uuid,<br/>sub:user@example.com,<br/>scope:read:datasets,<br/>tctx:{action,datasetId,classification},<br/>rctx:{req_ip,authn}, exp:+15s}
 ```
 
-### Step 1: Pluggable IdP Validation
+### Step 1: Pluggable IdP Validation (KEP-3331 inspired)
 
 ```mermaid
 flowchart LR
     subgraph "Token Exchange Request"
-        ST[subject_token]
-        STT[subject_token_type]
+        ST["subject_token<br/>(JWT)"]
     end
 
-    ST --> Router{SubjectTokenValidator<br/>Router}
-    STT --> Router
+    ST -->|"decode iss claim<br/>(unverified)"| Router{"Issuer Router<br/>match iss → authenticator"}
 
-    Router -->|"type: oidc<br/>issuer matches Entra"| Entra[Entra Validator<br/>providerURL: login.microsoft...<br/>subjectField: oid]
-    Router -->|"type: oidc<br/>issuer matches Keycloak"| KC[Keycloak Validator<br/>providerURL: keycloak.example...<br/>subjectField: email]
-    Router -->|"type: kubernetes-sa"| KSAT[K8s SA Validator<br/>issuer: oidc.prod-aks...<br/>validate against cluster OIDC]
-    Router -->|"type: self-signed"| SS[Self-Signed Validator<br/>jwksEndpoint: ...<br/>dev/test only]
+    Router -->|"iss: login.microsoftonline.com/..."| Entra["Entra Authenticator<br/>━━━━━━━━━━━━━━━━<br/>audiences: [app-id]<br/>claimValidation: claims.tid == ...<br/>claimMappings:<br/>  subject: claims.oid<br/>  extra: tenant, name"]
+    Router -->|"iss: keycloak.example.com/..."| KC["Keycloak Authenticator<br/>━━━━━━━━━━━━━━━━<br/>audiences: [my-client]<br/>claimMappings:<br/>  subject: email"]
+    Router -->|"iss: oidc.prod-aks.azure.com/..."| KSAT["K8s SA Authenticator<br/>━━━━━━━━━━━━━━━━<br/>audiences: [kontxt-tts]<br/>claimMappings:<br/>  subject: sub"]
 
-    Entra --> SubjectInfo[SubjectInfo<br/>sub + claims]
+    Entra -->|"1. OIDC discovery + JWKS<br/>2. Verify signature<br/>3. Check audiences<br/>4. CEL claim validation<br/>5. CEL claim mapping"| SubjectInfo["SubjectInfo<br/>sub + extra claims"]
     KC --> SubjectInfo
     KSAT --> SubjectInfo
-    SS --> SubjectInfo
 ```
 
 ---
@@ -601,9 +597,15 @@ flowchart TB
         AGW_PROXY -->|"ext_authz"| EA
     end
 
-    subgraph "Model 3: Library (direct call)"
-        APP["Application calls<br/>TTS SDK directly"]
-        APP -->|"HTTP"| TTS
+    subgraph "Model 3: SDK (direct)"
+        APP["Application uses<br/>kontxt SDK directly<br/>github.com/aramase/kontxt/sdk"]
+        APP_TTS["sdk/tts: token exchange"]
+        APP_VER["sdk/verify: TxToken validation"]
+        APP_MW["sdk/middleware: HTTP propagation"]
+        APP --> APP_TTS
+        APP --> APP_VER
+        APP --> APP_MW
+        APP_TTS -->|"HTTP"| TTS
     end
 
     CTRL --> CRDs
