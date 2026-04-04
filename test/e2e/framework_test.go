@@ -26,49 +26,145 @@ var (
 	ttsURL   string // set after port-forward
 )
 
-// setupCluster creates a kind cluster, builds images, and deploys kontxt.
-func setupCluster(t *testing.T) {
-	t.Helper()
+// setupClusterForTestMain creates the kind cluster for TestMain (no *testing.T).
+func setupClusterForTestMain() error {
+	root, err := findRepoRootFromCwd()
+	if err != nil {
+		return fmt.Errorf("finding repo root: %w", err)
+	}
+	repoRoot = root
 
-	repoRoot = findRepoRoot(t)
+	// Check if cluster already exists
+	out, _ := runCmdOutput("kind", "get", "clusters")
+	if strings.Contains(out, clusterName) {
+		fmt.Println("Kind cluster already exists, reusing")
+		return nil
+	}
 
-	t.Log("Creating kind cluster...")
-	runCmd(t, "kind", "create", "cluster", "--name", clusterName, "--wait", "60s")
+	fmt.Println("Creating kind cluster...")
+	if err := runCmdNoTest("kind", "create", "cluster", "--name", clusterName, "--wait", "60s"); err != nil {
+		return fmt.Errorf("creating kind cluster: %w", err)
+	}
 
-	t.Log("Building Docker images...")
-	runCmd(t, "docker", "build", "-t", "kontxt-tts:e2e", "-f", filepath.Join(repoRoot, "cmd/tts/Dockerfile"), repoRoot)
-	runCmd(t, "docker", "build", "-t", "kontxt-extauth:e2e", "-f", filepath.Join(repoRoot, "cmd/extauth/Dockerfile"), repoRoot)
-	runCmd(t, "docker", "build", "-t", "kontxt-controller:e2e", "-f", filepath.Join(repoRoot, "cmd/controller/Dockerfile"), repoRoot)
+	fmt.Println("Building Docker images...")
+	if err := runCmdNoTest("docker", "build", "-t", "kontxt-tts:e2e", "-f", filepath.Join(repoRoot, "cmd/tts/Dockerfile"), repoRoot); err != nil {
+		return fmt.Errorf("building TTS image: %w", err)
+	}
+	if err := runCmdNoTest("docker", "build", "-t", "kontxt-extauth:e2e", "-f", filepath.Join(repoRoot, "cmd/extauth/Dockerfile"), repoRoot); err != nil {
+		return fmt.Errorf("building extauth image: %w", err)
+	}
+	if err := runCmdNoTest("docker", "build", "-t", "kontxt-controller:e2e", "-f", filepath.Join(repoRoot, "cmd/controller/Dockerfile"), repoRoot); err != nil {
+		return fmt.Errorf("building controller image: %w", err)
+	}
 
-	t.Log("Loading images into kind...")
-	runCmd(t, "kind", "load", "docker-image", "kontxt-tts:e2e", "--name", clusterName)
-	runCmd(t, "kind", "load", "docker-image", "kontxt-extauth:e2e", "--name", clusterName)
-	runCmd(t, "kind", "load", "docker-image", "kontxt-controller:e2e", "--name", clusterName)
+	fmt.Println("Loading images into kind...")
+	for _, img := range []string{"kontxt-tts:e2e", "kontxt-extauth:e2e", "kontxt-controller:e2e"} {
+		if err := runCmdNoTest("kind", "load", "docker-image", img, "--name", clusterName); err != nil {
+			return fmt.Errorf("loading image %s: %w", img, err)
+		}
+	}
 
-	t.Log("Creating namespace...")
-	runCmd(t, "kubectl", "--context", "kind-"+clusterName, "create", "namespace", namespace)
+	fmt.Println("Creating namespace...")
+	if err := runCmdNoTest("kubectl", "--context", "kind-"+clusterName, "create", "namespace", namespace); err != nil {
+		return fmt.Errorf("creating namespace: %w", err)
+	}
 
-	t.Log("Applying CRDs...")
-	applyCRDs(t)
+	fmt.Println("Applying CRDs...")
+	if err := applyCRDsNoTest(); err != nil {
+		return fmt.Errorf("applying CRDs: %w", err)
+	}
 
-	t.Log("Deploying TTS...")
-	deployTTS(t)
+	fmt.Println("Deploying TTS...")
+	if err := runCmdNoTest("kubectl", "--context", "kind-"+clusterName, "apply", "-f", filepath.Join(repoRoot, "test/e2e/testdata/tts-deployment.yaml")); err != nil {
+		return fmt.Errorf("deploying TTS: %w", err)
+	}
 
-	t.Log("Waiting for TTS to be ready...")
-	waitForPod(t, namespace, "app.kubernetes.io/name=kontxt-tts", 120*time.Second)
+	fmt.Println("Waiting for TTS to be ready...")
+	if err := waitForPodNoTest(namespace, "app.kubernetes.io/name=kontxt-tts", 120*time.Second); err != nil {
+		return fmt.Errorf("waiting for TTS: %w", err)
+	}
+
+	fmt.Println("E2E setup complete")
+	return nil
 }
 
-// teardownCluster deletes the kind cluster.
-func teardownCluster(t *testing.T) {
-	t.Helper()
-	t.Log("Deleting kind cluster...")
+// cleanupCluster deletes the kind cluster (best-effort).
+func cleanupCluster() {
+	fmt.Println("Deleting kind cluster...")
 	cmd := exec.Command("kind", "delete", "cluster", "--name", clusterName)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Run() // best-effort, don't fail on cleanup
+	cmd.Run()
 }
 
-// applyCRDs applies the kontxt CRD definitions.
+// applyCRDsNoTest applies CRDs without requiring *testing.T.
+func applyCRDsNoTest() error {
+	crdDir := filepath.Join(repoRoot, "test/e2e/testdata")
+	entries, err := os.ReadDir(crdDir)
+	if err != nil {
+		return fmt.Errorf("reading CRD dir: %w", err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "kontxt.io_") && strings.HasSuffix(entry.Name(), ".yaml") {
+			if err := runCmdNoTest("kubectl", "--context", "kind-"+clusterName, "apply", "-f", filepath.Join(crdDir, entry.Name())); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// waitForPodNoTest waits for a pod to be Ready without *testing.T.
+func waitForPodNoTest(ns, labelSelector string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		out, err := runCmdOutput("kubectl", "--context", "kind-"+clusterName,
+			"-n", ns, "get", "pods", "-l", labelSelector,
+			"-o", "jsonpath={.items[0].status.conditions[?(@.type=='Ready')].status}")
+		if err == nil && strings.TrimSpace(out) == "True" {
+			fmt.Printf("Pod with label %s is Ready\n", labelSelector)
+			return nil
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return fmt.Errorf("timed out waiting for pod with label %s", labelSelector)
+}
+
+// runCmdNoTest runs a command without *testing.T, returning an error on failure.
+func runCmdNoTest(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// findRepoRootFromCwd finds the repo root without *testing.T.
+func findRepoRootFromCwd() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("could not find repo root (go.mod)")
+		}
+		dir = parent
+	}
+}
+
+// setupCluster creates a kind cluster — kept for backward compatibility but delegates to setupClusterForTestMain.
+func setupCluster(t *testing.T) {
+	t.Helper()
+	if err := setupClusterForTestMain(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// applyCRDs applies the kontxt CRD definitions (requires *testing.T).
 func applyCRDs(t *testing.T) {
 	t.Helper()
 	crdDir := filepath.Join(repoRoot, "test/e2e/testdata")
