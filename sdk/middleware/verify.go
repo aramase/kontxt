@@ -63,6 +63,20 @@ func TokenFromContext(ctx context.Context) string {
 	return t
 }
 
+// WithToken stores a TxToken string in a context for propagation.
+// Use this when a service obtains a TxToken (e.g., via the TTS client SDK)
+// and needs to propagate it to downstream calls via PropagateTransport.
+func WithToken(ctx context.Context, tokenString string) context.Context {
+	return withToken(ctx, tokenString)
+}
+
+// ExportedTokenContextKey returns the context key used for storing the TxToken.
+// This is primarily useful for tests and advanced usage where direct context
+// manipulation is needed.
+func ExportedTokenContextKey() contextKey {
+	return tokenContextKey
+}
+
 // withClaims stores claims in a context.
 func withClaims(ctx context.Context, claims *token.Claims) context.Context {
 	if ctx == nil {
