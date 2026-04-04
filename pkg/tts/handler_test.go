@@ -446,3 +446,102 @@ func TestServer_JWKSEndpoint(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, jwks.Keys, 1)
 }
+
+func TestHandler_IssuanceRuleDenies(t *testing.T) {
+	idpServer, idpKeyMgr, handler := testSetup(t)
+
+	// Set an issuance rule that blocks scope "admin:all"
+	rules, err := CompileIssuanceRules([]IssuanceRuleConfig{
+		{Name: "no-admin", CEL: `scope != "admin:all"`, Message: "admin scope not allowed"},
+	})
+	require.NoError(t, err)
+	handler.SetIssuanceRules(rules)
+
+	subjectToken := createSubjectToken(t, idpKeyMgr, idpServer.URL, jwt.MapClaims{
+		"iss":   idpServer.URL,
+		"aud":   "test-app",
+		"email": "user@example.com",
+		"exp":   time.Now().Add(5 * time.Minute).Unix(),
+		"iat":   time.Now().Unix(),
+	})
+
+	params := url.Values{
+		"grant_type":           {token.GrantType},
+		"subject_token":       {subjectToken},
+		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"requested_token_type": {token.RequestedTokenType},
+		"scope":               {"admin:all"},
+	}
+
+	rec := doTokenExchange(handler, params)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+
+	var errResp ErrorResponse
+	json.NewDecoder(rec.Body).Decode(&errResp)
+	assert.Equal(t, "policy_denied", errResp.Error)
+	assert.Contains(t, errResp.ErrorDescription, "admin scope not allowed")
+}
+
+func TestHandler_IssuanceRuleAllows(t *testing.T) {
+	idpServer, idpKeyMgr, handler := testSetup(t)
+
+	rules, err := CompileIssuanceRules([]IssuanceRuleConfig{
+		{Name: "require-read", CEL: `scope == "read:data"`, Message: "only read allowed"},
+	})
+	require.NoError(t, err)
+	handler.SetIssuanceRules(rules)
+
+	subjectToken := createSubjectToken(t, idpKeyMgr, idpServer.URL, jwt.MapClaims{
+		"iss":   idpServer.URL,
+		"aud":   "test-app",
+		"email": "user@example.com",
+		"exp":   time.Now().Add(5 * time.Minute).Unix(),
+		"iat":   time.Now().Unix(),
+	})
+
+	params := url.Values{
+		"grant_type":           {token.GrantType},
+		"subject_token":       {subjectToken},
+		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"requested_token_type": {token.RequestedTokenType},
+		"scope":               {"read:data"},
+	}
+
+	rec := doTokenExchange(handler, params)
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestHandler_IssuanceRuleWithTctx(t *testing.T) {
+	idpServer, idpKeyMgr, handler := testSetup(t)
+
+	rules, err := CompileIssuanceRules([]IssuanceRuleConfig{
+		{Name: "public-only", CEL: `tctx.classification == "public"`, Message: "only public data"},
+	})
+	require.NoError(t, err)
+	handler.SetIssuanceRules(rules)
+
+	subjectToken := createSubjectToken(t, idpKeyMgr, idpServer.URL, jwt.MapClaims{
+		"iss":   idpServer.URL,
+		"aud":   "test-app",
+		"email": "user@example.com",
+		"exp":   time.Now().Add(5 * time.Minute).Unix(),
+		"iat":   time.Now().Unix(),
+	})
+
+	// Should pass: classification is public
+	params := url.Values{
+		"grant_type":           {token.GrantType},
+		"subject_token":       {subjectToken},
+		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"requested_token_type": {token.RequestedTokenType},
+		"scope":               {"read:data"},
+		"request_details":     {`{"classification":"public"}`},
+	}
+	rec := doTokenExchange(handler, params)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	// Should fail: classification is pii
+	params.Set("request_details", `{"classification":"pii"}`)
+	rec = doTokenExchange(handler, params)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
