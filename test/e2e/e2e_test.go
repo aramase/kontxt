@@ -135,10 +135,10 @@ func TestE2E_TokenExchange(t *testing.T) {
 	// rejects requests properly.
 	params := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {"test-token"},
-		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"subject_token":        {"test-token"},
+		"subject_token_type":   {token.SubjectTokenTypeAccessToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"read:data"},
+		"scope":                {"read:data"},
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
+	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

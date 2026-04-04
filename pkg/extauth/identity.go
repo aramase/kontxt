@@ -17,9 +17,9 @@ type IdentityResolver struct {
 }
 
 type podInfo struct {
-	Name             string
-	Namespace        string
-	ServiceAccount   string
+	Name           string
+	Namespace      string
+	ServiceAccount string
 }
 
 // WorkloadIdentity represents a resolved workload identity.

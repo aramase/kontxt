@@ -75,6 +75,6 @@ type ExtraMapping struct {
 // AuthenticatorConfig is the full configuration for a single JWT authenticator.
 type AuthenticatorConfig struct {
 	Issuer               IssuerConfig          `json:"issuer" yaml:"issuer"`
-	ClaimValidationRules []ClaimValidationRule  `json:"claimValidationRules,omitempty" yaml:"claimValidationRules,omitempty"`
-	ClaimMappings        ClaimMappings          `json:"claimMappings" yaml:"claimMappings"`
+	ClaimValidationRules []ClaimValidationRule `json:"claimValidationRules,omitempty" yaml:"claimValidationRules,omitempty"`
+	ClaimMappings        ClaimMappings         `json:"claimMappings" yaml:"claimMappings"`
 }

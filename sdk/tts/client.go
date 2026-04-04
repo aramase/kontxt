@@ -69,10 +69,10 @@ func (c *Client) Exchange(ctx context.Context, req *ExchangeRequest) (string, er
 	// Build form parameters
 	form := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {req.SubjectToken},
-		"subject_token_type":  {req.SubjectTokenType},
+		"subject_token":        {req.SubjectToken},
+		"subject_token_type":   {req.SubjectTokenType},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {req.Scope},
+		"scope":                {req.Scope},
 	}
 
 	if req.RequestDetails != nil {
