@@ -1,6 +1,8 @@
-.PHONY: all build test test-e2e lint clean docker helm
+.PHONY: all build test test-e2e lint clean docker helm generate manifests verify-codegen
 
-all: test build
+CONTROLLER_GEN ?= $(shell which controller-gen)
+
+all: generate manifests test build
 
 # Build
 build:
@@ -36,6 +38,24 @@ test-e2e-keep:
 # Lint
 lint:
 	go vet ./...
+
+# Code generation
+generate: ## Generate DeepCopy methods
+	$(CONTROLLER_GEN) object paths=./api/...
+
+manifests: ## Generate CRD and RBAC manifests
+	$(CONTROLLER_GEN) crd paths=./api/... output:crd:dir=config/crd/bases
+	$(CONTROLLER_GEN) rbac:roleName=kontxt-controller paths=./internal/... output:rbac:dir=config/rbac
+	cp config/crd/bases/*.yaml deploy/helm/kontxt/crds/
+	cp config/crd/bases/*.yaml test/e2e/testdata/
+
+verify-codegen: generate manifests ## Verify generated files are up-to-date
+	@if [ -n "$$(git diff --name-only)" ]; then \
+		echo "ERROR: Generated files are out of date. Run 'make generate manifests' and commit."; \
+		git diff --name-only; \
+		exit 1; \
+	fi
+	@echo "Generated files are up-to-date."
 
 # Docker
 docker-tts:

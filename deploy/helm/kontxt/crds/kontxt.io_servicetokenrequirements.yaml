@@ -1,0 +1,195 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: servicetokenrequirements.kontxt.io
+spec:
+  group: kontxt.io
+  names:
+    kind: ServiceTokenRequirement
+    listKind: ServiceTokenRequirementList
+    plural: servicetokenrequirements
+    shortNames:
+    - str
+    singular: servicetokenrequirement
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ServiceTokenRequirement defines what a service requires in incoming TxTokens.
+          Owned by the service owner in their namespace.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ServiceTokenRequirementSpec defines verification requirements
+              for incoming TxTokens.
+            properties:
+              autoNarrow:
+                description: |-
+                  AutoNarrow, when true, causes the ext auth adapter to automatically
+                  request a scope-narrowed replacement token when the inbound TxToken
+                  has broader scope than requiredScope.
+                type: boolean
+              excludedEndpoints:
+                description: ExcludedEndpoints lists endpoints that skip TxToken verification.
+                items:
+                  description: EndpointSpec identifies an API endpoint.
+                  properties:
+                    method:
+                      description: Method is the HTTP method (e.g., "POST", "GET").
+                      type: string
+                    path:
+                      description: Path is the URL path pattern (e.g., "/api/v1/datasets/{datasetId}/analyze").
+                      type: string
+                  required:
+                  - method
+                  - path
+                  type: object
+                type: array
+              serviceRef:
+                description: ServiceRef references the Kubernetes service this requirement
+                  applies to.
+                properties:
+                  name:
+                    description: Name is the Kubernetes service name.
+                    type: string
+                required:
+                - name
+                type: object
+              verification:
+                description: Verification defines the TxToken verification requirements.
+                properties:
+                  requiredScope:
+                    description: RequiredScope is the minimum scope the TxToken must
+                      have.
+                    type: string
+                  requiredTctxFields:
+                    description: RequiredTctxFields lists tctx fields that must be
+                      present in the TxToken.
+                    items:
+                      type: string
+                    type: array
+                  rules:
+                    description: Rules are CEL-based verification rules evaluated
+                      against the TxToken.
+                    items:
+                      description: VerificationRule is a CEL expression evaluated
+                        against a TxToken.
+                      properties:
+                        cel:
+                          description: |-
+                            CEL is a CEL expression that must evaluate to true.
+                            Available variables: `txtoken` (all TxToken claims), `request` (HTTP request).
+                          type: string
+                        message:
+                          description: Message is the error message when the rule
+                            fails.
+                          type: string
+                        name:
+                          description: Name identifies this rule (used in error messages
+                            and metrics).
+                          type: string
+                      required:
+                      - cel
+                      - message
+                      - name
+                      type: object
+                    type: array
+                type: object
+            required:
+            - serviceRef
+            - verification
+            type: object
+          status:
+            description: ServiceTokenRequirementStatus defines the observed state.
+            properties:
+              activeVerificationRules:
+                description: ActiveVerificationRules is the count of active verification
+                  rules.
+                type: integer
+              conditions:
+                description: Conditions represent the latest available observations.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              excludedEndpointCount:
+                description: ExcludedEndpointCount is the count of excluded endpoints.
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

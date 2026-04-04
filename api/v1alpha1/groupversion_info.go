@@ -1,4 +1,3 @@
-// Package v1alpha1 contains API types for the kontxt.io API group.
 package v1alpha1
 
 import (

@@ -213,6 +213,7 @@ type ServiceTokenRequirementReconciler struct {
 
 // +kubebuilder:rbac:groups=kontxt.io,resources=servicetokenrequirements,verbs=get;list;watch
 // +kubebuilder:rbac:groups=kontxt.io,resources=servicetokenrequirements/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch
 
 func (r *ServiceTokenRequirementReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
