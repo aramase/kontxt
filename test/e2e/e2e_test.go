@@ -26,29 +26,27 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 
+	// Setup: create kind cluster and deploy kontxt
+	if err := setupClusterForTestMain(); err != nil {
+		fmt.Fprintf(os.Stderr, "E2E setup failed: %v\n", err)
+		cleanupCluster()
+		os.Exit(1)
+	}
+
 	// Run tests
 	code := m.Run()
+
+	// Cleanup: delete kind cluster (unless KONTXT_E2E_KEEP_CLUSTER=1)
+	if os.Getenv("KONTXT_E2E_KEEP_CLUSTER") != "1" {
+		cleanupCluster()
+	}
+
 	os.Exit(code)
 }
 
-// TestE2E_ClusterSetup creates the kind cluster and deploys kontxt.
-// This must run first — other tests depend on the cluster being ready.
-func TestE2E_ClusterSetup(t *testing.T) {
-	// Check if cluster already exists (for iterative development)
-	if _, err := runCmdOutput("kind", "get", "clusters"); err == nil {
-		out, _ := runCmdOutput("kind", "get", "clusters")
-		if strings.Contains(out, clusterName) {
-			t.Log("Cluster already exists, skipping setup")
-			return
-		}
-	}
-
-	setupCluster(t)
-	t.Cleanup(func() {
-		if os.Getenv("KONTXT_E2E_KEEP_CLUSTER") != "1" {
-			teardownCluster(t)
-		}
-	})
+// TestE2E_ClusterReady verifies the cluster is ready (sanity check).
+func TestE2E_ClusterReady(t *testing.T) {
+	ensureCluster(t)
 }
 
 func TestE2E_TTSHealthCheck(t *testing.T) {
