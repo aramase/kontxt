@@ -24,12 +24,12 @@ type IssuanceRuleConfig struct {
 
 // IssuanceContext contains the variables available to CEL issuance rules.
 type IssuanceContext struct {
-	Subject       string
-	Scope         string
-	Tctx          map[string]any
-	Rctx          map[string]any
-	Workload      string
-	WorkloadNS    string
+	Subject    string
+	Scope      string
+	Tctx       map[string]any
+	Rctx       map[string]any
+	Workload   string
+	WorkloadNS string
 }
 
 // newIssuanceCELEnv creates a CEL environment for issuance rules.
@@ -95,10 +95,10 @@ func EvaluateIssuanceRules(rules []IssuanceRule, ictx *IssuanceContext) error {
 
 	// Build the activation map
 	activation := map[string]any{
-		"subject":   ictx.Subject,
-		"scope":     ictx.Scope,
-		"tctx":      ictx.Tctx,
-		"rctx":      ictx.Rctx,
+		"subject":     ictx.Subject,
+		"scope":       ictx.Scope,
+		"tctx":        ictx.Tctx,
+		"rctx":        ictx.Rctx,
 		"workload":    ictx.Workload,
 		"workload_ns": ictx.WorkloadNS,
 	}

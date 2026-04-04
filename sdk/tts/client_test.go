@@ -216,9 +216,9 @@ func TestClient_ConstructsCorrectRequest(t *testing.T) {
 		// Return a fake response
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
-			"access_token":     "fake-txtoken",
+			"access_token":      "fake-txtoken",
 			"issued_token_type": token.RequestedTokenType,
-			"token_type":       "N_A",
+			"token_type":        "N_A",
 		})
 	}))
 	defer server.Close()

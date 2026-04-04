@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
+	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 

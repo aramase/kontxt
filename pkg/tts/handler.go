@@ -161,10 +161,10 @@ func (h *Handler) handleReplacement(w http.ResponseWriter, r *http.Request, req 
 	claims := token.Claims{
 		Issuer:             h.issuer,
 		Audience:           h.trustDomain,
-		TransactionID:      existingClaims.TransactionID, // PRESERVE txn
-		Subject:            existingClaims.Subject,       // PRESERVE sub
-		Scope:              req.Scope,                    // NARROWED scope
-		RequestingWorkload: workloadID,                   // UPDATED req_wl
+		TransactionID:      existingClaims.TransactionID,      // PRESERVE txn
+		Subject:            existingClaims.Subject,            // PRESERVE sub
+		Scope:              req.Scope,                         // NARROWED scope
+		RequestingWorkload: workloadID,                        // UPDATED req_wl
 		TransactionContext: existingClaims.TransactionContext, // PRESERVE tctx
 		RequesterContext:   existingClaims.RequesterContext,   // PRESERVE rctx
 	}

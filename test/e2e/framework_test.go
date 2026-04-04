@@ -22,8 +22,8 @@ const (
 )
 
 var (
-	repoRoot  string
-	ttsURL    string // set after port-forward
+	repoRoot string
+	ttsURL   string // set after port-forward
 )
 
 // setupCluster creates a kind cluster, builds images, and deploys kontxt.

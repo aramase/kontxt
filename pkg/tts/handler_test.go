@@ -96,10 +96,10 @@ func TestHandler_ValidTokenExchange(t *testing.T) {
 
 	params := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {subjectToken},
-		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"subject_token":        {subjectToken},
+		"subject_token_type":   {token.SubjectTokenTypeAccessToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"read:data"},
+		"scope":                {"read:data"},
 	}
 
 	rec := doTokenExchange(handler, params)
@@ -132,10 +132,10 @@ func TestHandler_InvalidSubjectToken(t *testing.T) {
 
 	params := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {"invalid-token"},
-		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"subject_token":        {"invalid-token"},
+		"subject_token_type":   {token.SubjectTokenTypeAccessToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"read:data"},
+		"scope":                {"read:data"},
 	}
 
 	rec := doTokenExchange(handler, params)
@@ -150,10 +150,10 @@ func TestHandler_MissingGrantType(t *testing.T) {
 	_, _, handler := testSetup(t)
 
 	params := url.Values{
-		"subject_token":       {"some-token"},
-		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"subject_token":        {"some-token"},
+		"subject_token_type":   {token.SubjectTokenTypeAccessToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"read:data"},
+		"scope":                {"read:data"},
 	}
 
 	rec := doTokenExchange(handler, params)
@@ -165,10 +165,10 @@ func TestHandler_WrongGrantType(t *testing.T) {
 
 	params := url.Values{
 		"grant_type":           {"authorization_code"},
-		"subject_token":       {"some-token"},
-		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"subject_token":        {"some-token"},
+		"subject_token_type":   {token.SubjectTokenTypeAccessToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"read:data"},
+		"scope":                {"read:data"},
 	}
 
 	rec := doTokenExchange(handler, params)
@@ -180,9 +180,9 @@ func TestHandler_MissingSubjectToken(t *testing.T) {
 
 	params := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"subject_token_type":   {token.SubjectTokenTypeAccessToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"read:data"},
+		"scope":                {"read:data"},
 	}
 
 	rec := doTokenExchange(handler, params)
@@ -194,10 +194,10 @@ func TestHandler_WrongRequestedTokenType(t *testing.T) {
 
 	params := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {"some-token"},
-		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"subject_token":        {"some-token"},
+		"subject_token_type":   {token.SubjectTokenTypeAccessToken},
 		"requested_token_type": {"urn:ietf:params:oauth:token-type:access_token"},
-		"scope":               {"read:data"},
+		"scope":                {"read:data"},
 	}
 
 	rec := doTokenExchange(handler, params)
@@ -209,8 +209,8 @@ func TestHandler_MissingScope(t *testing.T) {
 
 	params := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {"some-token"},
-		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"subject_token":        {"some-token"},
+		"subject_token_type":   {token.SubjectTokenTypeAccessToken},
 		"requested_token_type": {token.RequestedTokenType},
 	}
 
@@ -231,11 +231,11 @@ func TestHandler_RequestDetails_BecomeTctx(t *testing.T) {
 
 	params := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {subjectToken},
-		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"subject_token":        {subjectToken},
+		"subject_token_type":   {token.SubjectTokenTypeAccessToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"read:data"},
-		"request_details":     {`{"action":"analyze","datasetId":"ds-1234"}`},
+		"scope":                {"read:data"},
+		"request_details":      {`{"action":"analyze","datasetId":"ds-1234"}`},
 	}
 
 	rec := doTokenExchange(handler, params)
@@ -268,11 +268,11 @@ func TestHandler_RequestContext_BecomesRctx(t *testing.T) {
 
 	params := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {subjectToken},
-		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"subject_token":        {subjectToken},
+		"subject_token_type":   {token.SubjectTokenTypeAccessToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"read:data"},
-		"request_context":     {`{"req_ip":"10.0.0.42","authn":"oidc"}`},
+		"scope":                {"read:data"},
+		"request_context":      {`{"req_ip":"10.0.0.42","authn":"oidc"}`},
 	}
 
 	rec := doTokenExchange(handler, params)
@@ -305,11 +305,11 @@ func TestHandler_InvalidRequestDetailsJSON(t *testing.T) {
 
 	params := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {subjectToken},
-		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"subject_token":        {subjectToken},
+		"subject_token_type":   {token.SubjectTokenTypeAccessToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"read:data"},
-		"request_details":     {`not valid json`},
+		"scope":                {"read:data"},
+		"request_details":      {`not valid json`},
 	}
 
 	rec := doTokenExchange(handler, params)
@@ -339,10 +339,10 @@ func TestHandler_ResponseFormat(t *testing.T) {
 
 	params := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {subjectToken},
-		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"subject_token":        {subjectToken},
+		"subject_token_type":   {token.SubjectTokenTypeAccessToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"read:data"},
+		"scope":                {"read:data"},
 	}
 
 	rec := doTokenExchange(handler, params)
@@ -468,10 +468,10 @@ func TestHandler_IssuanceRuleDenies(t *testing.T) {
 
 	params := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {subjectToken},
-		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"subject_token":        {subjectToken},
+		"subject_token_type":   {token.SubjectTokenTypeAccessToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"admin:all"},
+		"scope":                {"admin:all"},
 	}
 
 	rec := doTokenExchange(handler, params)
@@ -502,10 +502,10 @@ func TestHandler_IssuanceRuleAllows(t *testing.T) {
 
 	params := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {subjectToken},
-		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"subject_token":        {subjectToken},
+		"subject_token_type":   {token.SubjectTokenTypeAccessToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"read:data"},
+		"scope":                {"read:data"},
 	}
 
 	rec := doTokenExchange(handler, params)
@@ -532,11 +532,11 @@ func TestHandler_IssuanceRuleWithTctx(t *testing.T) {
 	// Should pass: classification is public
 	params := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {subjectToken},
-		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"subject_token":        {subjectToken},
+		"subject_token_type":   {token.SubjectTokenTypeAccessToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"read:data"},
-		"request_details":     {`{"classification":"public"}`},
+		"scope":                {"read:data"},
+		"request_details":      {`{"classification":"public"}`},
 	}
 	rec := doTokenExchange(handler, params)
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -569,10 +569,10 @@ func TestHandler_TokenReplacement_NarrowScope(t *testing.T) {
 
 	params := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {subjectToken},
-		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"subject_token":        {subjectToken},
+		"subject_token_type":   {token.SubjectTokenTypeAccessToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"read:data write:reports execute:analysis"},
+		"scope":                {"read:data write:reports execute:analysis"},
 	}
 	rec := doTokenExchange(handler, params)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -589,10 +589,10 @@ func TestHandler_TokenReplacement_NarrowScope(t *testing.T) {
 	// Now: replace with narrower scope
 	narrowParams := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {originalTxToken},
-		"subject_token_type":  {token.SubjectTokenTypeTxnToken},
+		"subject_token":        {originalTxToken},
+		"subject_token_type":   {token.SubjectTokenTypeTxnToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"read:data"},
+		"scope":                {"read:data"},
 	}
 	rec2 := doTokenExchange(handler, narrowParams)
 	require.Equal(t, http.StatusOK, rec2.Code)
@@ -628,10 +628,10 @@ func TestHandler_TokenReplacement_ScopeExpansionDenied(t *testing.T) {
 
 	params := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {subjectToken},
-		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"subject_token":        {subjectToken},
+		"subject_token_type":   {token.SubjectTokenTypeAccessToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"read:data"},
+		"scope":                {"read:data"},
 	}
 	rec := doTokenExchange(handler, params)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -642,10 +642,10 @@ func TestHandler_TokenReplacement_ScopeExpansionDenied(t *testing.T) {
 	// Try to replace with BROADER scope → should be denied
 	expandParams := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {resp.AccessToken},
-		"subject_token_type":  {token.SubjectTokenTypeTxnToken},
+		"subject_token":        {resp.AccessToken},
+		"subject_token_type":   {token.SubjectTokenTypeTxnToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"read:data write:reports admin:all"},
+		"scope":                {"read:data write:reports admin:all"},
 	}
 	rec2 := doTokenExchange(handler, expandParams)
 	assert.Equal(t, http.StatusForbidden, rec2.Code)
@@ -674,12 +674,12 @@ func TestHandler_TokenReplacement_PreservesTctxRctx(t *testing.T) {
 	// Create original token with tctx and rctx
 	params := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {subjectToken},
-		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"subject_token":        {subjectToken},
+		"subject_token_type":   {token.SubjectTokenTypeAccessToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"read:data write:reports"},
-		"request_details":     {`{"action":"analyze","datasetId":"ds-1"}`},
-		"request_context":     {`{"req_ip":"10.0.0.1","authn":"oidc"}`},
+		"scope":                {"read:data write:reports"},
+		"request_details":      {`{"action":"analyze","datasetId":"ds-1"}`},
+		"request_context":      {`{"req_ip":"10.0.0.1","authn":"oidc"}`},
 	}
 	rec := doTokenExchange(handler, params)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -690,10 +690,10 @@ func TestHandler_TokenReplacement_PreservesTctxRctx(t *testing.T) {
 	// Replace with narrower scope
 	narrowParams := url.Values{
 		"grant_type":           {token.GrantType},
-		"subject_token":       {resp.AccessToken},
-		"subject_token_type":  {token.SubjectTokenTypeTxnToken},
+		"subject_token":        {resp.AccessToken},
+		"subject_token_type":   {token.SubjectTokenTypeTxnToken},
 		"requested_token_type": {token.RequestedTokenType},
-		"scope":               {"read:data"},
+		"scope":                {"read:data"},
 	}
 	rec2 := doTokenExchange(handler, narrowParams)
 	require.Equal(t, http.StatusOK, rec2.Code)
