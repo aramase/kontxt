@@ -16,6 +16,7 @@ import (
 
 	"github.com/aramase/kontxt/internal/controller"
 	"github.com/aramase/kontxt/pkg/token"
+	sdktts "github.com/aramase/kontxt/sdk/tts"
 	"github.com/aramase/kontxt/sdk/verify"
 )
 
@@ -25,6 +26,7 @@ type Server struct {
 
 	verifier          *verify.Verifier
 	verificationRules []controller.VerificationRule
+	ttsClient         *sdktts.Client // for auto-narrowing
 }
 
 // NewServer creates a new ext auth server in verification mode.
@@ -37,6 +39,11 @@ func NewServer(verifier *verify.Verifier) *Server {
 // SetVerificationRules updates the verification rules (from ServiceTokenRequirement CRDs).
 func (s *Server) SetVerificationRules(rules []controller.VerificationRule) {
 	s.verificationRules = rules
+}
+
+// SetTTSClient sets the TTS client for auto-narrowing support.
+func (s *Server) SetTTSClient(client *sdktts.Client) {
+	s.ttsClient = client
 }
 
 // Register registers the ext auth server with a gRPC server.
@@ -77,7 +84,59 @@ func (s *Server) Check(ctx context.Context, req *authv3.CheckRequest) (*authv3.C
 		return denied(codes.PermissionDenied, err.Error()), nil
 	}
 
+	// Auto-narrowing: if any rule has autoNarrow and the scope is broader, replace the token
+	if narrowedToken := s.autoNarrow(ctx, claims, txTokenStr); narrowedToken != "" {
+		return allowedWithHeaders(map[string]string{
+			token.HeaderName: narrowedToken,
+		}), nil
+	}
+
 	return allowed(), nil
+}
+
+// autoNarrow checks if any verification rule requires scope narrowing and calls the TTS
+// to replace the token with a narrower-scoped one.
+func (s *Server) autoNarrow(ctx context.Context, claims *token.Claims, originalToken string) string {
+	if s.ttsClient == nil {
+		return ""
+	}
+
+	for _, rule := range s.verificationRules {
+		if !rule.AutoNarrow || rule.RequiredScope == "" {
+			continue
+		}
+
+		// Check if the token scope is broader than the required scope
+		if claims.Scope != rule.RequiredScope && scopeIsBroader(claims.Scope, rule.RequiredScope) {
+			// Request a replacement token with narrowed scope
+			narrowedToken, err := s.ttsClient.Exchange(ctx, &sdktts.ExchangeRequest{
+				SubjectToken:     originalToken,
+				SubjectTokenType: token.SubjectTokenTypeTxnToken,
+				Scope:            rule.RequiredScope,
+			})
+			if err != nil {
+				// Log error but don't fail — return original token
+				return ""
+			}
+			return narrowedToken
+		}
+	}
+
+	return ""
+}
+
+// scopeIsBroader checks if scopeA contains all scopes of scopeB plus more.
+func scopeIsBroader(broader, narrower string) bool {
+	broaderSet := make(map[string]bool)
+	for _, s := range strings.Fields(broader) {
+		broaderSet[s] = true
+	}
+	for _, s := range strings.Fields(narrower) {
+		if !broaderSet[s] {
+			return false // narrower has a scope not in broader
+		}
+	}
+	return len(strings.Fields(broader)) > len(strings.Fields(narrower))
 }
 
 // checkVerificationRules checks the TxToken claims against ServiceTokenRequirement rules.

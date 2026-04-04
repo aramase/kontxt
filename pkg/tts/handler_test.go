@@ -18,6 +18,7 @@ import (
 	"github.com/aramase/kontxt/pkg/authn"
 	"github.com/aramase/kontxt/pkg/keys"
 	"github.com/aramase/kontxt/pkg/token"
+	"github.com/aramase/kontxt/sdk/verify"
 )
 
 // testSetup creates a test OIDC server, key manager, and TTS handler.
@@ -544,4 +545,172 @@ func TestHandler_IssuanceRuleWithTctx(t *testing.T) {
 	params.Set("request_details", `{"classification":"pii"}`)
 	rec = doTokenExchange(handler, params)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestHandler_TokenReplacement_NarrowScope(t *testing.T) {
+	idpServer, idpKeyMgr, handler := testSetup(t)
+
+	// Set up a verifier so the handler can verify existing TxTokens
+	ttsKeyMgr := handler.keyManager
+	jwksServer := httptest.NewServer(ttsKeyMgr.JWKSHandler())
+	defer jwksServer.Close()
+
+	verifier := verify.New(jwksServer.URL, "trust-domain.example.com")
+	handler.SetVerifier(verifier)
+
+	// First: get a TxToken with broad scope
+	subjectToken := createSubjectToken(t, idpKeyMgr, idpServer.URL, jwt.MapClaims{
+		"iss":   idpServer.URL,
+		"aud":   "test-app",
+		"email": "user@example.com",
+		"exp":   time.Now().Add(5 * time.Minute).Unix(),
+		"iat":   time.Now().Unix(),
+	})
+
+	params := url.Values{
+		"grant_type":           {token.GrantType},
+		"subject_token":       {subjectToken},
+		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"requested_token_type": {token.RequestedTokenType},
+		"scope":               {"read:data write:reports execute:analysis"},
+	}
+	rec := doTokenExchange(handler, params)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp TokenExchangeResponse
+	json.NewDecoder(rec.Body).Decode(&resp)
+	originalTxToken := resp.AccessToken
+
+	// Parse to get the original txn
+	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
+	parsed, _, _ := parser.ParseUnverified(originalTxToken, jwt.MapClaims{})
+	originalTxn := parsed.Claims.(jwt.MapClaims)["txn"].(string)
+
+	// Now: replace with narrower scope
+	narrowParams := url.Values{
+		"grant_type":           {token.GrantType},
+		"subject_token":       {originalTxToken},
+		"subject_token_type":  {token.SubjectTokenTypeTxnToken},
+		"requested_token_type": {token.RequestedTokenType},
+		"scope":               {"read:data"},
+	}
+	rec2 := doTokenExchange(handler, narrowParams)
+	require.Equal(t, http.StatusOK, rec2.Code)
+
+	var resp2 TokenExchangeResponse
+	json.NewDecoder(rec2.Body).Decode(&resp2)
+
+	// Verify the replacement token
+	parsed2, _, _ := parser.ParseUnverified(resp2.AccessToken, jwt.MapClaims{})
+	claims2 := parsed2.Claims.(jwt.MapClaims)
+
+	assert.Equal(t, originalTxn, claims2["txn"], "txn must be preserved")
+	assert.Equal(t, "user@example.com", claims2["sub"], "sub must be preserved")
+	assert.Equal(t, "read:data", claims2["scope"], "scope must be narrowed")
+}
+
+func TestHandler_TokenReplacement_ScopeExpansionDenied(t *testing.T) {
+	idpServer, idpKeyMgr, handler := testSetup(t)
+
+	ttsKeyMgr := handler.keyManager
+	jwksServer := httptest.NewServer(ttsKeyMgr.JWKSHandler())
+	defer jwksServer.Close()
+	handler.SetVerifier(verify.New(jwksServer.URL, "trust-domain.example.com"))
+
+	// Get a TxToken with narrow scope
+	subjectToken := createSubjectToken(t, idpKeyMgr, idpServer.URL, jwt.MapClaims{
+		"iss":   idpServer.URL,
+		"aud":   "test-app",
+		"email": "user@example.com",
+		"exp":   time.Now().Add(5 * time.Minute).Unix(),
+		"iat":   time.Now().Unix(),
+	})
+
+	params := url.Values{
+		"grant_type":           {token.GrantType},
+		"subject_token":       {subjectToken},
+		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"requested_token_type": {token.RequestedTokenType},
+		"scope":               {"read:data"},
+	}
+	rec := doTokenExchange(handler, params)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp TokenExchangeResponse
+	json.NewDecoder(rec.Body).Decode(&resp)
+
+	// Try to replace with BROADER scope → should be denied
+	expandParams := url.Values{
+		"grant_type":           {token.GrantType},
+		"subject_token":       {resp.AccessToken},
+		"subject_token_type":  {token.SubjectTokenTypeTxnToken},
+		"requested_token_type": {token.RequestedTokenType},
+		"scope":               {"read:data write:reports admin:all"},
+	}
+	rec2 := doTokenExchange(handler, expandParams)
+	assert.Equal(t, http.StatusForbidden, rec2.Code)
+
+	var errResp ErrorResponse
+	json.NewDecoder(rec2.Body).Decode(&errResp)
+	assert.Equal(t, "invalid_scope", errResp.Error)
+}
+
+func TestHandler_TokenReplacement_PreservesTctxRctx(t *testing.T) {
+	idpServer, idpKeyMgr, handler := testSetup(t)
+
+	ttsKeyMgr := handler.keyManager
+	jwksServer := httptest.NewServer(ttsKeyMgr.JWKSHandler())
+	defer jwksServer.Close()
+	handler.SetVerifier(verify.New(jwksServer.URL, "trust-domain.example.com"))
+
+	subjectToken := createSubjectToken(t, idpKeyMgr, idpServer.URL, jwt.MapClaims{
+		"iss":   idpServer.URL,
+		"aud":   "test-app",
+		"email": "user@example.com",
+		"exp":   time.Now().Add(5 * time.Minute).Unix(),
+		"iat":   time.Now().Unix(),
+	})
+
+	// Create original token with tctx and rctx
+	params := url.Values{
+		"grant_type":           {token.GrantType},
+		"subject_token":       {subjectToken},
+		"subject_token_type":  {token.SubjectTokenTypeAccessToken},
+		"requested_token_type": {token.RequestedTokenType},
+		"scope":               {"read:data write:reports"},
+		"request_details":     {`{"action":"analyze","datasetId":"ds-1"}`},
+		"request_context":     {`{"req_ip":"10.0.0.1","authn":"oidc"}`},
+	}
+	rec := doTokenExchange(handler, params)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp TokenExchangeResponse
+	json.NewDecoder(rec.Body).Decode(&resp)
+
+	// Replace with narrower scope
+	narrowParams := url.Values{
+		"grant_type":           {token.GrantType},
+		"subject_token":       {resp.AccessToken},
+		"subject_token_type":  {token.SubjectTokenTypeTxnToken},
+		"requested_token_type": {token.RequestedTokenType},
+		"scope":               {"read:data"},
+	}
+	rec2 := doTokenExchange(handler, narrowParams)
+	require.Equal(t, http.StatusOK, rec2.Code)
+
+	var resp2 TokenExchangeResponse
+	json.NewDecoder(rec2.Body).Decode(&resp2)
+
+	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
+	parsed, _, _ := parser.ParseUnverified(resp2.AccessToken, jwt.MapClaims{})
+	claims := parsed.Claims.(jwt.MapClaims)
+
+	// tctx and rctx must be preserved from the original
+	tctx := claims["tctx"].(map[string]any)
+	assert.Equal(t, "analyze", tctx["action"])
+	assert.Equal(t, "ds-1", tctx["datasetId"])
+
+	rctx := claims["rctx"].(map[string]any)
+	assert.Equal(t, "10.0.0.1", rctx["req_ip"])
+	assert.Equal(t, "oidc", rctx["authn"])
 }

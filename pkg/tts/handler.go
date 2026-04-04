@@ -10,12 +10,14 @@ import (
 	"github.com/aramase/kontxt/pkg/authn"
 	"github.com/aramase/kontxt/pkg/keys"
 	"github.com/aramase/kontxt/pkg/token"
+	"github.com/aramase/kontxt/sdk/verify"
 )
 
 // Handler processes RFC 8693 token exchange requests and issues TxTokens.
 type Handler struct {
 	router        *authn.Router
 	keyManager    *keys.Manager
+	verifier      *verify.Verifier // for token replacement (verifying existing TxTokens)
 	issuer        string
 	trustDomain   string
 	lifetime      time.Duration
@@ -31,6 +33,11 @@ func NewHandler(router *authn.Router, keyManager *keys.Manager, issuer, trustDom
 		trustDomain: trustDomain,
 		lifetime:    lifetime,
 	}
+}
+
+// SetVerifier sets the TxToken verifier for token replacement support.
+func (h *Handler) SetVerifier(v *verify.Verifier) {
+	h.verifier = v
 }
 
 // SetIssuanceRules updates the compiled issuance rules evaluated before token issuance.
@@ -81,6 +88,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Dispatch: token replacement vs new token issuance
+	if req.SubjectTokenType == token.SubjectTokenTypeTxnToken {
+		h.handleReplacement(w, r, req)
+		return
+	}
+
 	// Validate the subject token via the authenticator router
 	subjectInfo, err := h.router.Authenticate(r.Context(), req.SubjectToken)
 	if err != nil {
@@ -117,7 +130,50 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		RequesterContext:   req.RequestContext,
 	}
 
-	// Sign the TxToken
+	h.signAndRespond(w, claims)
+}
+
+// handleReplacement handles token replacement: exchanges an existing TxToken for a
+// narrower-scoped one. Preserves the `txn` claim for audit correlation.
+func (h *Handler) handleReplacement(w http.ResponseWriter, r *http.Request, req *TokenExchangeRequest) {
+	// Verify the existing TxToken
+	if h.verifier == nil {
+		writeError(w, http.StatusInternalServerError, "server_error", "token replacement not configured (no verifier)")
+		return
+	}
+
+	existingClaims, err := h.verifier.Verify(r.Context(), req.SubjectToken)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid_token", fmt.Sprintf("existing TxToken verification failed: %v", err))
+		return
+	}
+
+	// Validate that requested scope is a subset of the existing scope
+	if !isScopeSubset(req.Scope, existingClaims.Scope) {
+		writeError(w, http.StatusForbidden, "invalid_scope",
+			fmt.Sprintf("requested scope %q is not a subset of existing scope %q", req.Scope, existingClaims.Scope))
+		return
+	}
+
+	workloadID := identifyWorkload(r)
+
+	// Build replacement TxToken — preserve txn, sub, tctx, rctx from original
+	claims := token.Claims{
+		Issuer:             h.issuer,
+		Audience:           h.trustDomain,
+		TransactionID:      existingClaims.TransactionID, // PRESERVE txn
+		Subject:            existingClaims.Subject,       // PRESERVE sub
+		Scope:              req.Scope,                    // NARROWED scope
+		RequestingWorkload: workloadID,                   // UPDATED req_wl
+		TransactionContext: existingClaims.TransactionContext, // PRESERVE tctx
+		RequesterContext:   existingClaims.RequesterContext,   // PRESERVE rctx
+	}
+
+	h.signAndRespond(w, claims)
+}
+
+// signAndRespond signs the TxToken and writes the RFC 8693 response.
+func (h *Handler) signAndRespond(w http.ResponseWriter, claims token.Claims) {
 	signingKey, kid := h.keyManager.SigningKey()
 	txToken, err := token.New(claims, signingKey, kid, h.lifetime)
 	if err != nil {
@@ -222,4 +278,19 @@ func writeError(w http.ResponseWriter, status int, errCode, description string) 
 		Error:            errCode,
 		ErrorDescription: description,
 	})
+}
+
+// isScopeSubset checks if requested scope is a subset of the existing scope.
+// Both are space-delimited strings.
+func isScopeSubset(requested, existing string) bool {
+	existingScopes := make(map[string]bool)
+	for _, s := range strings.Fields(existing) {
+		existingScopes[s] = true
+	}
+	for _, s := range strings.Fields(requested) {
+		if !existingScopes[s] {
+			return false
+		}
+	}
+	return true
 }
