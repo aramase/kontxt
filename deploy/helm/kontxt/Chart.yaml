@@ -1,0 +1,18 @@
+apiVersion: v2
+name: kontxt
+description: Transaction Tokens (TxTokens) for Kubernetes — seal identity, context, and authorization across multi-hop agent workflows.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - transaction-tokens
+  - agent-identity
+  - ext-authz
+  - agentgateway
+  - kubernetes
+home: https://github.com/aramase/kontxt
+sources:
+  - https://github.com/aramase/kontxt
+maintainers:
+  - name: Anish Ramasekar
+    url: https://github.com/aramase
