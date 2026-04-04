@@ -14,11 +14,12 @@ import (
 
 // Handler processes RFC 8693 token exchange requests and issues TxTokens.
 type Handler struct {
-	router      *authn.Router
-	keyManager  *keys.Manager
-	issuer      string
-	trustDomain string
-	lifetime    time.Duration
+	router        *authn.Router
+	keyManager    *keys.Manager
+	issuer        string
+	trustDomain   string
+	lifetime      time.Duration
+	issuanceRules []IssuanceRule
 }
 
 // NewHandler creates a new token exchange handler.
@@ -30,6 +31,11 @@ func NewHandler(router *authn.Router, keyManager *keys.Manager, issuer, trustDom
 		trustDomain: trustDomain,
 		lifetime:    lifetime,
 	}
+}
+
+// SetIssuanceRules updates the compiled issuance rules evaluated before token issuance.
+func (h *Handler) SetIssuanceRules(rules []IssuanceRule) {
+	h.issuanceRules = rules
 }
 
 // TokenExchangeRequest represents the parsed RFC 8693 token exchange parameters.
@@ -82,13 +88,31 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	workloadID := identifyWorkload(r)
+
+	// Evaluate CEL issuance rules (if configured)
+	if len(h.issuanceRules) > 0 {
+		ictx := &IssuanceContext{
+			Subject:    subjectInfo.Subject,
+			Scope:      req.Scope,
+			Tctx:       req.RequestDetails,
+			Rctx:       req.RequestContext,
+			Workload:   workloadID,
+			WorkloadNS: "", // populated by ext auth adapter in production
+		}
+		if err := EvaluateIssuanceRules(h.issuanceRules, ictx); err != nil {
+			writeError(w, http.StatusForbidden, "policy_denied", err.Error())
+			return
+		}
+	}
+
 	// Build the TxToken claims
 	claims := token.Claims{
 		Issuer:             h.issuer,
 		Audience:           h.trustDomain,
 		Subject:            subjectInfo.Subject,
 		Scope:              req.Scope,
-		RequestingWorkload: identifyWorkload(r),
+		RequestingWorkload: workloadID,
 		TransactionContext: req.RequestDetails,
 		RequesterContext:   req.RequestContext,
 	}
