@@ -58,9 +58,8 @@ func (c *Config) Validate() error {
 	if c.Issuer == "" {
 		return fmt.Errorf("issuer is required")
 	}
-	if len(c.SubjectTokens) == 0 {
-		return fmt.Errorf("at least one subjectToken authenticator is required")
-	}
+	// SubjectTokens can be empty — the TTS will reject all token exchange
+	// requests until authenticators are configured (useful for initial deploy).
 	return nil
 }
 

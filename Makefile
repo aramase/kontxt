@@ -1,4 +1,4 @@
-.PHONY: all build test lint clean docker helm
+.PHONY: all build test test-e2e lint clean docker helm
 
 all: test build
 
@@ -25,6 +25,13 @@ test-verbose:
 test-coverage:
 	go test ./... -count=1 -race -coverprofile=coverage.out
 	go tool cover -html=coverage.out -o coverage.html
+
+# E2E tests (requires Docker + kind)
+test-e2e:
+	KONTXT_E2E=1 go test -tags e2e ./test/e2e/ -v -count=1 -timeout 10m
+
+test-e2e-keep:
+	KONTXT_E2E=1 KONTXT_E2E_KEEP_CLUSTER=1 go test -tags e2e ./test/e2e/ -v -count=1 -timeout 10m
 
 # Lint
 lint:
