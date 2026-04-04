@@ -48,6 +48,12 @@ jobs:
           gofmt -l .
           test -z "$(gofmt -l .)"
 
+      - name: Install controller-gen
+        run: go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
+
+      - name: Verify codegen
+        run: make verify-codegen
+
   build:
     name: Build
     runs-on: ubuntu-latest

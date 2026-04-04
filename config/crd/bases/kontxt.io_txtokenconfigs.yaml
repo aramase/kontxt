@@ -1,0 +1,257 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: txtokenconfigs.kontxt.io
+spec:
+  group: kontxt.io
+  names:
+    kind: TxTokenConfig
+    listKind: TxTokenConfigList
+    plural: txtokenconfigs
+    shortNames:
+    - ttc
+    singular: txtokenconfig
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          TxTokenConfig is the cluster-scoped configuration for the Transaction Token Service.
+          Owned by the platform admin.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: TxTokenConfigSpec defines the TTS infrastructure configuration.
+            properties:
+              defaults:
+                description: Defaults contains default token settings.
+                properties:
+                  signingAlgorithm:
+                    default: RS256
+                    description: SigningAlgorithm is the JWT signing algorithm.
+                    type: string
+                  tokenLifetime:
+                    default: 15s
+                    description: TokenLifetime is the default TxToken lifetime (e.g.,
+                      "15s").
+                    type: string
+                type: object
+              issuer:
+                description: Issuer is the TTS issuer URI, used as the `iss` claim
+                  in TxTokens.
+                type: string
+              subjectTokens:
+                description: |-
+                  SubjectTokens is an ordered list of JWT authenticators for subject token validation.
+                  The first authenticator whose issuer URL matches the token's `iss` claim handles it.
+                  Inspired by KEP-3331 (Structured Authentication Configuration).
+                items:
+                  description: SubjectTokenAuthenticator configures a single JWT authenticator
+                    for subject tokens.
+                  properties:
+                    claimMappings:
+                      description: ClaimMappings defines how JWT claims are mapped
+                        to the TxToken subject.
+                      properties:
+                        extra:
+                          description: Extra carries additional identity attributes
+                            from the IdP token.
+                          items:
+                            description: ExtraMapping maps a JWT claim to an extra
+                              key-value pair.
+                            properties:
+                              key:
+                                description: Key is the extra attribute key (e.g.,
+                                  "tenant", "name").
+                                type: string
+                              valueExpression:
+                                description: ValueExpression is a CEL expression producing
+                                  the value.
+                                type: string
+                            required:
+                            - key
+                            - valueExpression
+                            type: object
+                          type: array
+                        subject:
+                          description: |-
+                            Subject determines which claim becomes the TxToken's `sub`.
+                            Exactly one of Claim or Expression must be set.
+                          properties:
+                            claim:
+                              description: Claim is a simple JWT claim name (e.g.,
+                                "email", "sub", "oid").
+                              type: string
+                            expression:
+                              description: Expression is a CEL expression evaluated
+                                against the `claims` map.
+                              type: string
+                          type: object
+                      required:
+                      - subject
+                      type: object
+                    claimValidationRules:
+                      description: |-
+                        ClaimValidationRules are CEL expressions evaluated against raw JWT claims.
+                        Each rule must evaluate to true for the token to be accepted.
+                      items:
+                        description: ClaimValidationRule is a CEL expression evaluated
+                          against raw JWT claims.
+                        properties:
+                          expression:
+                            description: |-
+                              Expression is a CEL expression that must evaluate to true.
+                              The variable `claims` is available as a map[string]any.
+                            type: string
+                          message:
+                            description: Message is the error message returned when
+                              the expression evaluates to false.
+                            type: string
+                        required:
+                        - expression
+                        - message
+                        type: object
+                      type: array
+                    issuer:
+                      description: Issuer configures the OIDC issuer for this authenticator.
+                      properties:
+                        audienceMatchPolicy:
+                          description: |-
+                            AudienceMatchPolicy determines how audiences are matched.
+                            "MatchAny" means the token's aud must contain at least one configured audience.
+                          enum:
+                          - MatchAny
+                          type: string
+                        audiences:
+                          description: Audiences is the list of acceptable audience
+                            values.
+                          items:
+                            type: string
+                          minItems: 1
+                          type: array
+                        discoveryURL:
+                          description: |-
+                            DiscoveryURL overrides where to fetch OIDC discovery metadata.
+                            If empty, defaults to {URL}/.well-known/openid-configuration.
+                          type: string
+                        url:
+                          description: URL is the issuer identifier. Must match the
+                            `iss` claim in incoming tokens.
+                          type: string
+                      required:
+                      - audiences
+                      - url
+                      type: object
+                  required:
+                  - claimMappings
+                  - issuer
+                  type: object
+                minItems: 1
+                type: array
+              trustDomain:
+                description: TrustDomain is the trust domain identifier, used as the
+                  `aud` claim in TxTokens.
+                type: string
+              workloadAuth:
+                description: WorkloadAuth configures how the TTS authenticates the
+                  requesting workload.
+                properties:
+                  type:
+                    default: kubernetes-sa
+                    description: Type is the workload authentication mechanism.
+                    enum:
+                    - kubernetes-sa
+                    - spiffe
+                    type: string
+                type: object
+            required:
+            - issuer
+            - subjectTokens
+            - trustDomain
+            type: object
+          status:
+            description: TxTokenConfigStatus defines the observed state of TxTokenConfig.
+            properties:
+              conditions:
+                description: Conditions represent the latest available observations.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

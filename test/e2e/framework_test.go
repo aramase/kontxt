@@ -71,12 +71,15 @@ func teardownCluster(t *testing.T) {
 // applyCRDs applies the kontxt CRD definitions.
 func applyCRDs(t *testing.T) {
 	t.Helper()
-	// Apply CRDs from testdata
 	crdDir := filepath.Join(repoRoot, "test/e2e/testdata")
-	for _, f := range []string{"crd-txtokenconfig.yaml", "crd-transactiontype.yaml", "crd-servicetokenrequirement.yaml", "crd-tokenpolicy.yaml"} {
-		path := filepath.Join(crdDir, f)
-		if _, err := os.Stat(path); err == nil {
-			runCmd(t, "kubectl", "--context", "kind-"+clusterName, "apply", "-f", path)
+	// Apply all generated CRD YAML files
+	entries, err := os.ReadDir(crdDir)
+	if err != nil {
+		t.Fatalf("failed to read CRD dir: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "kontxt.io_") && strings.HasSuffix(entry.Name(), ".yaml") {
+			runCmd(t, "kubectl", "--context", "kind-"+clusterName, "apply", "-f", filepath.Join(crdDir, entry.Name()))
 		}
 	}
 }

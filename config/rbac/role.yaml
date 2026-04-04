@@ -1,0 +1,36 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kontxt-controller
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - kontxt.io
+  resources:
+  - servicetokenrequirements
+  - tokenpolicies
+  - transactiontypes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - kontxt.io
+  resources:
+  - servicetokenrequirements/status
+  - transactiontypes/status
+  verbs:
+  - get
+  - patch
+  - update
