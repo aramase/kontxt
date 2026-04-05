@@ -202,7 +202,7 @@ func TestApplyVerificationRules(t *testing.T) {
 			RequiredScope:      "read:data",
 			RequiredTctxFields: []string{"datasetId"},
 			CELRules: []controller.CELRule{
-				{Name: "check1", CEL: "txtoken.tctx.datasetId != ''" , Message: "datasetId required"},
+				{Name: "check1", CEL: "txtoken.tctx.datasetId != ''", Message: "datasetId required"},
 			},
 			ExcludedEndpoints: []v1alpha1.EndpointSpec{
 				{Path: "/healthz", Method: "GET"},
