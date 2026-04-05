@@ -168,12 +168,9 @@ func deployAgentsStack() error {
 		return fmt.Errorf("applying CRD instances: %w", err)
 	}
 
-	// Wait for the controller to reconcile CRDs into ConfigMaps before deploying
-	// ext-auth-generate, so the ConfigMap volume mount has data at startup.
-	fmt.Println("Waiting for generation rules ConfigMap...")
-	if err := waitForConfigMap(namespace, "kontxt-generation-rules", 60*time.Second); err != nil {
-		return fmt.Errorf("waiting for generation rules ConfigMap: %w", err)
-	}
+	// Wait for the controller to reconcile CRDs before deploying ext-auth-generate.
+	fmt.Println("Waiting for controller to reconcile CRDs...")
+	time.Sleep(5 * time.Second)
 
 	fmt.Println("Deploying ext auth generate adapter...")
 	if err := runCmdNoTest("kubectl", "--context", agentsKubeContext, "apply",
@@ -205,7 +202,7 @@ func deployAgentsStack() error {
 		}
 	}
 
-	// Wait for ext-auth-generate — it may take a moment for the controller ConfigMap
+	// Wait for ext-auth-generate — rules are streamed via gRPC on connect.
 	if err := waitForAgentsDeployment(namespace, "kontxt-extauth-generate", 120*time.Second); err != nil {
 		return fmt.Errorf("waiting for kontxt-extauth-generate: %w", err)
 	}
@@ -228,21 +225,6 @@ func waitForAgentsDeployment(ns, name string, timeout time.Duration) error {
 	return runCmdNoTest("kubectl", "--context", agentsKubeContext,
 		"rollout", "status", "deployment/"+name, "-n", ns,
 		"--timeout", fmt.Sprintf("%ds", int(timeout.Seconds())))
-}
-
-func waitForConfigMap(ns, name string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		out, err := runCmdOutput("kubectl", "--context", agentsKubeContext,
-			"-n", ns, "get", "configmap", name,
-			"-o", "jsonpath={.data.rules\\.json}")
-		if err == nil && strings.TrimSpace(out) != "" && strings.TrimSpace(out) != "{}" {
-			fmt.Printf("ConfigMap %s/%s has data\n", ns, name)
-			return nil
-		}
-		time.Sleep(2 * time.Second)
-	}
-	return fmt.Errorf("timed out waiting for ConfigMap %s/%s", ns, name)
 }
 
 func waitForAgentsPod(ns, labelSelector string, timeout time.Duration) error {
@@ -351,41 +333,32 @@ func TestAgentsE2E_PodsReady(t *testing.T) {
 	t.Logf("demo pods:\n%s", out)
 }
 
-func TestAgentsE2E_ConfigMapsGenerated(t *testing.T) {
+func TestAgentsE2E_RulesStreamed(t *testing.T) {
+	// Verify the controller has reconciled CRDs by checking TransactionType status.
 	out, err := runCmdOutput("kubectl", "--context", agentsKubeContext,
-		"get", "configmap", "kontxt-generation-rules", "-n", namespace,
-		"-o", "jsonpath={.data.rules\\.json}")
+		"get", "transactiontype", "earnings-research", "-n", "demo",
+		"-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}")
 	if err != nil {
-		t.Fatalf("failed to get generation rules: %v", err)
+		t.Fatalf("failed to get TransactionType status: %v", err)
 	}
-	if out == "" {
-		t.Fatal("generation rules ConfigMap is empty")
+	if strings.TrimSpace(out) != "True" {
+		t.Fatalf("TransactionType earnings-research not Ready, got: %s", out)
 	}
+	t.Log("TransactionType earnings-research is Ready")
 
-	var genRules []interface{}
-	if err := json.Unmarshal([]byte(out), &genRules); err != nil {
-		t.Fatalf("invalid generation rules JSON: %v", err)
+	// Verify ServiceTokenRequirements are reconciled.
+	for _, name := range []string{"retriever", "analyzer"} {
+		out, err := runCmdOutput("kubectl", "--context", agentsKubeContext,
+			"get", "servicetokenrequirement", name, "-n", "demo",
+			"-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}")
+		if err != nil {
+			t.Fatalf("failed to get STR %s status: %v", name, err)
+		}
+		if strings.TrimSpace(out) != "True" {
+			t.Fatalf("STR %s not Ready, got: %s", name, out)
+		}
+		t.Logf("ServiceTokenRequirement %s is Ready", name)
 	}
-	if len(genRules) == 0 {
-		t.Error("expected at least 1 generation rule")
-	}
-	t.Logf("Found %d generation rules", len(genRules))
-
-	out, err = runCmdOutput("kubectl", "--context", agentsKubeContext,
-		"get", "configmap", "kontxt-verification-rules", "-n", namespace,
-		"-o", "jsonpath={.data.rules\\.json}")
-	if err != nil {
-		t.Fatalf("failed to get verification rules: %v", err)
-	}
-
-	var verRules []interface{}
-	if err := json.Unmarshal([]byte(out), &verRules); err != nil {
-		t.Fatalf("invalid verification rules JSON: %v", err)
-	}
-	if len(verRules) < 2 {
-		t.Errorf("expected at least 2 verification rules, got %d", len(verRules))
-	}
-	t.Logf("Found %d verification rules", len(verRules))
 }
 
 func TestAgentsE2E_IdPToken(t *testing.T) {

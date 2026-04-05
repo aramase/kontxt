@@ -37,22 +37,13 @@ spec:
             - --jwks=http://kontxt-tts.{{ .Values.namespace }}.svc.cluster.local/.well-known/jwks.json
             - --trust-domain={{ .Values.tts.config.trustDomain }}
             - --mode=verify
-            - --rules-file=/etc/kontxt/rules/rules.json
+            - --controller-addr=kontxt-controller.{{ .Values.namespace }}.svc.cluster.local:9090
           ports:
             - containerPort: {{ .Values.extauth.port }}
               name: grpc
               protocol: TCP
-          volumeMounts:
-            - name: verification-rules
-              mountPath: /etc/kontxt/rules
-              readOnly: true
           resources:
             {{- toYaml .Values.extauth.resources | nindent 12 }}
-      volumes:
-        - name: verification-rules
-          configMap:
-            name: kontxt-verification-rules
-            optional: true
 ---
 apiVersion: v1
 kind: Service

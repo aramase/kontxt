@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+package kontxt.rules.v1;
+
+// RuleDiscoveryService streams generation and verification rules from
+// the kontxt controller to ext-auth adapter instances. This replaces
+// the ConfigMap-based distribution mechanism.
+service RuleDiscoveryService {
+  // StreamGenerationRules streams generation rules (from TransactionType CRDs)
+  // to ext-auth instances running in generation mode. The server sends an
+  // initial full snapshot on connection, followed by incremental updates.
+  rpc StreamGenerationRules(stream StreamGenerationRulesRequest) returns (stream StreamGenerationRulesResponse);
+
+  // StreamVerificationRules streams verification rules (from ServiceTokenRequirement CRDs)
+  // to ext-auth instances running in verification mode.
+  rpc StreamVerificationRules(stream StreamVerificationRulesRequest) returns (stream StreamVerificationRulesResponse);
+}
+
+// StreamGenerationRulesRequest is sent by the client to acknowledge received updates.
+message StreamGenerationRulesRequest {
+  // version_info is the version most recently received by the client.
+  // Empty on initial connection.
+  string version_info = 1;
+}
+
+// StreamGenerationRulesResponse carries a generation rules update.
+message StreamGenerationRulesResponse {
+  oneof update {
+    // snapshot replaces all rules (sent on initial connection and full rebuilds).
+    GenerationRulesSnapshot snapshot = 1;
+    // delta contains incremental changes (upserts and removals).
+    GenerationRulesDelta delta = 2;
+  }
+  // version_info is a monotonically increasing version identifier.
+  string version_info = 3;
+}
+
+// GenerationRulesSnapshot is a complete set of generation rules.
+message GenerationRulesSnapshot {
+  repeated GenerationRule rules = 1;
+}
+
+// GenerationRulesDelta contains incremental changes to generation rules.
+message GenerationRulesDelta {
+  repeated GenerationRule upserted = 1;
+  repeated RuleRef removed = 2;
+}
+
+// StreamVerificationRulesRequest is sent by the client to acknowledge received updates.
+message StreamVerificationRulesRequest {
+  // version_info is the version most recently received by the client.
+  string version_info = 1;
+}
+
+// StreamVerificationRulesResponse carries a verification rules update.
+message StreamVerificationRulesResponse {
+  oneof update {
+    VerificationRulesSnapshot snapshot = 1;
+    VerificationRulesDelta delta = 2;
+  }
+  string version_info = 3;
+}
+
+// VerificationRulesSnapshot is a complete set of verification rules.
+message VerificationRulesSnapshot {
+  repeated VerificationRule rules = 1;
+}
+
+// VerificationRulesDelta contains incremental changes to verification rules.
+message VerificationRulesDelta {
+  repeated VerificationRule upserted = 1;
+  repeated RuleRef removed = 2;
+}
+
+// RuleRef identifies a rule by namespace and name (for removal deltas).
+message RuleRef {
+  string namespace = 1;
+  string name = 2;
+}
+
+// GenerationRule is a compiled generation rule pushed to ext-auth instances.
+// Mirrors controller.GenerationRule.
+message GenerationRule {
+  string namespace = 1;
+  string name = 2;
+  EndpointSpec endpoint = 3;
+  string purpose = 4;
+  string scope = 5;
+  map<string, TctxFieldMapping> tctx_mapping = 6;
+  repeated TctxEnrichment tctx_enrichments = 7;
+  repeated string rctx_fields = 8;
+  string token_lifetime = 9;
+}
+
+// VerificationRule is a compiled verification rule pushed to ext-auth instances.
+// Mirrors controller.VerificationRule.
+message VerificationRule {
+  string namespace = 1;
+  string name = 2;
+  string service_name = 3;
+  string required_scope = 4;
+  repeated string required_tctx_fields = 5;
+  repeated CELRule cel_rules = 6;
+  repeated EndpointSpec excluded_endpoints = 7;
+  bool auto_narrow = 8;
+}
+
+// EndpointSpec identifies an API endpoint. Mirrors v1alpha1.EndpointSpec.
+message EndpointSpec {
+  string path = 1;
+  string method = 2;
+}
+
+// TctxFieldMapping defines how to extract a tctx field from the request.
+// Mirrors v1alpha1.TctxFieldMapping.
+message TctxFieldMapping {
+  string source = 1;
+  string field = 2;
+  bool required = 3;
+}
+
+// TctxEnrichment defines a computed tctx field. Mirrors v1alpha1.TctxEnrichment.
+message TctxEnrichment {
+  string field = 1;
+  string enricher = 2;
+}
+
+// CELRule is a named CEL expression for verification. Mirrors controller.CELRule.
+message CELRule {
+  string name = 1;
+  string cel = 2;
+  string message = 3;
+}

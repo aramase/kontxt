@@ -27,9 +27,6 @@ rules:
       - transactiontypes/status
       - servicetokenrequirements/status
     verbs: [get, update, patch]
-  - apiGroups: [""]
-    resources: [configmaps]
-    verbs: [get, list, watch, create, update, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -74,10 +71,30 @@ spec:
           args:
             - --metrics-bind-address=:8090
             - --health-probe-bind-address=:8091
+            - --grpc-addr=:9090
           ports:
             - containerPort: 8090
               name: metrics
             - containerPort: 8091
               name: health
+            - containerPort: 9090
+              name: grpc
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kontxt-controller
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: kontxt-controller
+    app.kubernetes.io/part-of: kontxt
+spec:
+  selector:
+    app.kubernetes.io/name: kontxt-controller
+  ports:
+    - port: 9090
+      targetPort: grpc
+      protocol: TCP
+      name: grpc
