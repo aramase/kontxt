@@ -1,0 +1,151 @@
+# Gateway — AgentGateway proxy with HTTP listener
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: demo-gateway
+  namespace: demo
+spec:
+  gatewayClassName: agentgateway
+  listeners:
+    - protocol: HTTP
+      port: 80
+      name: http
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+# HTTPRoute — mock IdP (no ext_authz)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: idp-route
+  namespace: demo
+spec:
+  parentRefs:
+    - name: demo-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /idp
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+      backendRefs:
+        - name: mock-idp
+          port: 8080
+---
+# HTTPRoute — orchestrator entry point (gets generate policy)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: orchestrator-route
+  namespace: demo
+spec:
+  parentRefs:
+    - name: demo-gateway
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /api/research
+          method: POST
+      backendRefs:
+        - name: orchestrator
+          port: 8081
+---
+# HTTPRoute — retriever (gets verify policy)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: retriever-route
+  namespace: demo
+spec:
+  parentRefs:
+    - name: demo-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/retrieve
+      backendRefs:
+        - name: retriever
+          port: 8082
+---
+# HTTPRoute — analyzer (gets verify policy)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: analyzer-route
+  namespace: demo
+spec:
+  parentRefs:
+    - name: demo-gateway
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /api/analyze
+          method: POST
+      backendRefs:
+        - name: analyzer
+          port: 8083
+---
+# AgentgatewayPolicy — generate TxToken at entry point
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: txtoken-generate
+  namespace: demo
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: orchestrator-route
+  traffic:
+    extAuth:
+      backendRef:
+        name: kontxt-extauth-generate
+        namespace: kontxt-system
+        port: 9000
+      grpc: {}
+---
+# AgentgatewayPolicy — verify TxToken at downstream services
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: txtoken-verify-retriever
+  namespace: demo
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: retriever-route
+  traffic:
+    extAuth:
+      backendRef:
+        name: kontxt-extauth
+        namespace: kontxt-system
+        port: 9000
+      grpc: {}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: txtoken-verify-analyzer
+  namespace: demo
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: analyzer-route
+  traffic:
+    extAuth:
+      backendRef:
+        name: kontxt-extauth
+        namespace: kontxt-system
+        port: 9000
+      grpc: {}
