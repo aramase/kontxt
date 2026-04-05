@@ -20,8 +20,8 @@ spec:
     spec:
       containers:
         - name: mock-idp
-          image: ghcr.io/aramase/kontxt-mock-idp:latest
-          imagePullPolicy: IfNotPresent
+          image: kontxt-mock-idp:latest
+          imagePullPolicy: Never
           args:
             - --addr=:8080
             - --issuer=http://mock-idp.demo.svc.cluster.local:8080
@@ -81,8 +81,8 @@ spec:
     spec:
       containers:
         - name: orchestrator
-          image: ghcr.io/aramase/kontxt-orchestrator:latest
-          imagePullPolicy: IfNotPresent
+          image: kontxt-orchestrator:latest
+          imagePullPolicy: Never
           args:
             - --addr=:8081
             - --retriever=http://retriever.demo.svc.cluster.local:8082
@@ -143,8 +143,8 @@ spec:
     spec:
       containers:
         - name: retriever
-          image: ghcr.io/aramase/kontxt-retriever:latest
-          imagePullPolicy: IfNotPresent
+          image: kontxt-retriever:latest
+          imagePullPolicy: Never
           args:
             - --addr=:8082
             - --jwks=http://kontxt-tts.kontxt-system.svc.cluster.local/.well-known/jwks.json
@@ -205,8 +205,8 @@ spec:
     spec:
       containers:
         - name: analyzer
-          image: ghcr.io/aramase/kontxt-analyzer:latest
-          imagePullPolicy: IfNotPresent
+          image: kontxt-analyzer:latest
+          imagePullPolicy: Never
           args:
             - --addr=:8083
             - --jwks=http://kontxt-tts.kontxt-system.svc.cluster.local/.well-known/jwks.json

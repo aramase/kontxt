@@ -14,6 +14,11 @@ import (
 
 // RulesLoader loads generation or verification rules from a JSON file
 // and watches for changes (e.g., from Kubernetes ConfigMap volume mounts).
+//
+// TODO(scalability): The current ConfigMap-based approach mounts rules as a JSON file
+// and uses fsnotify to watch for changes. For a more scalable approach, this should be
+// replaced with a gRPC/xDS-based mechanism where the controller pushes rule updates to
+// ext-auth instances directly, avoiding ConfigMap size limits and mount propagation delays.
 type RulesLoader struct {
 	path string
 	mode string // "generate" or "verify"

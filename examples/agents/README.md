@@ -28,39 +28,47 @@ An end-to-end demo of kontxt Transaction Tokens with AgentGateway, showing autom
 
 ## Prerequisites
 
-- A Kubernetes cluster (AKS, GKE, EKS)
-- `kubectl`, `helm`, `docker`, `jq`
-- An Azure Container Registry (or modify `setup.sh` for your registry)
+- [Docker](https://docs.docker.com/get-docker/)
+- [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
+- `kubectl`, `helm`, `jq`
 
 ## Quick Start
 
 ```bash
-export ACR_NAME=myregistry   # your ACR name (without .azurecr.io)
 ./setup.sh
 ```
 
 The script will:
-1. Build and push all images to your ACR
-2. Install Gateway API CRDs and AgentGateway
-3. Install kontxt (TTS, ext auth, controller)
-4. Deploy a second ext auth adapter in generate mode
-5. Deploy the demo services (mock-idp, orchestrator, retriever, analyzer)
-6. Apply kontxt CRD instances (TxTokenConfig, TransactionType, ServiceTokenRequirements, TokenPolicy)
-7. Create the Gateway, HTTPRoutes, and AgentgatewayPolicies
-8. Print the gateway address and example curl commands
+1. Create a kind cluster (or reuse an existing one)
+2. Build and load all images into the kind cluster
+3. Install Gateway API CRDs and AgentGateway
+4. Deploy the demo services (mock-idp, orchestrator, retriever, analyzer)
+5. Install kontxt (TTS, ext auth, controller)
+6. Deploy a second ext auth adapter in generate mode
+7. Apply kontxt CRD instances (TxTokenConfig, TransactionType, ServiceTokenRequirements, TokenPolicy)
+8. Create the Gateway, HTTPRoutes, and AgentgatewayPolicies
+9. Print port-forward instructions and example curl commands
+
+To use an existing kind cluster:
+
+```bash
+KIND_CLUSTER_NAME=my-cluster ./setup.sh
+```
 
 ## Manual Walkthrough
 
-Once `setup.sh` completes, get the gateway address:
+Once `setup.sh` completes, port-forward to the gateway:
 
 ```bash
-export GW=$(kubectl get gateway demo-gateway -n demo -o jsonpath='{.status.addresses[0].value}')
+kubectl port-forward -n demo svc/demo-gateway 8080:80
 ```
+
+Then in another terminal:
 
 ### Step 1: Get an access token
 
 ```bash
-TOKEN=$(curl -s http://$GW/idp/token \
+TOKEN=$(curl -s http://localhost:8080/idp/token \
   -H 'Content-Type: application/json' \
   -d '{"email":"alice@example.com","scope":"read:docs analyze:data"}' | jq -r .access_token)
 ```
@@ -68,7 +76,7 @@ TOKEN=$(curl -s http://$GW/idp/token \
 ### Step 2: Send a research request
 
 ```bash
-curl -s http://$GW/api/research \
+curl -s http://localhost:8080/api/research \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"company":"ACME","period":"Q3-2024","question":"Summarize earnings"}' | jq .
@@ -108,7 +116,7 @@ The `txn` value is identical across all services — that's the TxToken providin
 ### Missing authorization
 
 ```bash
-curl -s -w "\n%{http_code}\n" http://$GW/api/research \
+curl -s -w "\n%{http_code}\n" http://localhost:8080/api/research \
   -H 'Content-Type: application/json' \
   -d '{"company":"ACME","period":"Q3-2024","question":"test"}'
 # 401 — no access token, ext auth rejects
@@ -117,7 +125,7 @@ curl -s -w "\n%{http_code}\n" http://$GW/api/research \
 ### Expired or invalid token
 
 ```bash
-curl -s -w "\n%{http_code}\n" http://$GW/api/research \
+curl -s -w "\n%{http_code}\n" http://localhost:8080/api/research \
   -H "Authorization: Bearer invalid-token" \
   -H 'Content-Type: application/json' \
   -d '{"company":"ACME","period":"Q3-2024","question":"test"}'
@@ -139,20 +147,5 @@ The kontxt controller reconciles these CRDs into ConfigMaps (`kontxt-generation-
 ## Cleanup
 
 ```bash
-# Remove demo resources
-kubectl delete -f examples/agents/manifests/gateway.yaml
-kubectl delete -f examples/agents/manifests/kontxt-platform.yaml
-kubectl delete -f examples/agents/manifests/services.yaml
-kubectl delete -f examples/agents/manifests/ext-auth-generate.yaml
-kubectl delete -f examples/agents/manifests/namespace.yaml
-
-# Uninstall kontxt
-helm uninstall kontxt -n kontxt-system
-kubectl delete -f deploy/helm/kontxt/crds/
-
-# Uninstall AgentGateway
-helm uninstall agentgateway agentgateway-crds -n agentgateway-system
-
-# Remove Gateway API CRDs
-kubectl delete -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.0/standard-install.yaml
+kind delete cluster --name kontxt-demo
 ```

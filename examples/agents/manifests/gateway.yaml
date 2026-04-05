@@ -112,6 +112,8 @@ spec:
         namespace: kontxt-system
         port: 9000
       grpc: {}
+      forwardBody:
+        maxSize: 8192
 ---
 # AgentgatewayPolicy — verify TxToken at downstream services
 apiVersion: agentgateway.dev/v1alpha1
