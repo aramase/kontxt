@@ -90,7 +90,7 @@ data:
   config.yaml: |
     trustDomain: {{ .Values.tts.config.trustDomain | quote }}
     issuer: {{ .Values.tts.config.issuer | quote }}
-    subjectTokens: []
+    subjectTokens: {{ .Values.tts.config.subjectTokens | toYaml | nindent 4 }}
     defaults:
       tokenLifetime: {{ .Values.tts.config.tokenLifetime | quote }}
       keySize: {{ .Values.tts.config.keySize }}

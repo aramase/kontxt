@@ -20,6 +20,7 @@ tts:
     issuer: "https://kontxt-tts.kontxt-system.svc.cluster.local"
     tokenLifetime: "15s"
     keySize: 2048
+    subjectTokens: []
 
 # Ext auth adapter configuration
 extauth:

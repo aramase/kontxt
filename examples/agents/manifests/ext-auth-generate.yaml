@@ -32,8 +32,8 @@ spec:
       serviceAccountName: kontxt-extauth-generate
       containers:
         - name: extauth
-          image: ghcr.io/aramase/kontxt-extauth:latest
-          imagePullPolicy: IfNotPresent
+          image: kontxt-extauth:latest
+          imagePullPolicy: Never
           args:
             - --addr=:9000
             - --tts=http://kontxt-tts.kontxt-system.svc.cluster.local
