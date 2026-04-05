@@ -1,14 +1,20 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/aramase/kontxt/pkg/extauth"
+	"github.com/aramase/kontxt/pkg/extauth/ruleclient"
 	sdktts "github.com/aramase/kontxt/sdk/tts"
 	"github.com/aramase/kontxt/sdk/verify"
 )
@@ -19,7 +25,7 @@ func main() {
 	jwksURL := flag.String("jwks", "http://localhost:8080/.well-known/jwks.json", "TTS JWKS URL")
 	trustDomain := flag.String("trust-domain", "trust-domain.example.com", "trust domain for TxToken verification")
 	mode := flag.String("mode", "verify", "mode: verify or generate")
-	rulesFile := flag.String("rules-file", "", "path to JSON rules file (from controller ConfigMap mount)")
+	controllerAddr := flag.String("controller-addr", "kontxt-controller.kontxt-system.svc.cluster.local:9090", "controller gRPC address for rule streaming")
 	flag.Parse()
 
 	lis, err := net.Listen("tcp", *addr)
@@ -29,27 +35,18 @@ func main() {
 
 	gs := grpc.NewServer()
 
-	var loader *extauth.RulesLoader
-	if *rulesFile != "" {
-		loader = extauth.NewRulesLoader(*rulesFile, *mode)
-	}
+	rc := ruleclient.NewRuleClient(*controllerAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
 
 	switch *mode {
 	case "verify":
 		verifier := verify.New(*jwksURL, *trustDomain)
 		server := extauth.NewServer(verifier)
-		if loader != nil {
-			loader.SetVerifyServer(server)
-			if err := loader.LoadOnce(); err != nil {
-				log.Fatalf("Failed to load verification rules: %v", err)
-			}
-			done := make(chan struct{})
-			go func() {
-				if err := loader.WatchAndReload(done); err != nil {
-					log.Printf("Rules watcher error: %v", err)
-				}
-			}()
-		}
+		rc.SetVerificationSetter(server)
 		server.Register(gs)
 		fmt.Printf("Ext auth adapter (verification mode) listening on %s\n", *addr)
 
@@ -57,24 +54,24 @@ func main() {
 		ttsClient := sdktts.NewClient(*ttsEndpoint)
 		resolver := extauth.NewIdentityResolver()
 		server := extauth.NewGenerationServer(ttsClient, resolver)
-		if loader != nil {
-			loader.SetGenerationServer(server)
-			if err := loader.LoadOnce(); err != nil {
-				log.Fatalf("Failed to load generation rules: %v", err)
-			}
-			done := make(chan struct{})
-			go func() {
-				if err := loader.WatchAndReload(done); err != nil {
-					log.Printf("Rules watcher error: %v", err)
-				}
-			}()
-		}
+		rc.SetGenerationSetter(server)
 		extauth.RegisterGenerationServer(gs, server)
 		fmt.Printf("Ext auth adapter (generation mode) listening on %s\n", *addr)
 
 	default:
 		log.Fatalf("Unknown mode: %s (use 'verify' or 'generate')", *mode)
 	}
+
+	go func() {
+		if err := rc.Run(ctx); err != nil && err != context.Canceled {
+			log.Printf("Rule client error: %v", err)
+		}
+	}()
+
+	go func() {
+		<-ctx.Done()
+		gs.GracefulStop()
+	}()
 
 	if err := gs.Serve(lis); err != nil {
 		log.Fatalf("gRPC server failed: %v", err)

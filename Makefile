@@ -1,4 +1,4 @@
-.PHONY: all build test test-e2e test-agents-e2e lint clean docker helm generate manifests verify-codegen
+.PHONY: all build test test-e2e test-agents-e2e lint clean docker helm generate generate-proto manifests verify-codegen
 
 CONTROLLER_GEN ?= $(shell which controller-gen)
 
@@ -49,6 +49,10 @@ lint:
 # Code generation
 generate: ## Generate DeepCopy methods
 	$(CONTROLLER_GEN) object paths=./api/...
+
+generate-proto: ## Generate Go code from proto definitions
+	buf generate
+	buf lint
 
 manifests: ## Generate CRD and RBAC manifests
 	$(CONTROLLER_GEN) crd paths=./api/... output:crd:dir=config/crd/bases
