@@ -1,0 +1,86 @@
+# TxTokenConfig — cluster-scoped platform configuration
+apiVersion: kontxt.io/v1alpha1
+kind: TxTokenConfig
+metadata:
+  name: demo-config
+spec:
+  trustDomain: demo.example.com
+  issuer: https://kontxt-tts.kontxt-system.svc.cluster.local
+  subjectTokens:
+    - issuer:
+        url: "http://mock-idp.demo.svc.cluster.local:8080"
+        audiences: ["demo-app"]
+      claimMappings:
+        subject:
+          claim: "email"
+  defaults:
+    tokenLifetime: "15s"
+---
+# TransactionType — defines the research transaction at the entry point
+apiVersion: kontxt.io/v1alpha1
+kind: TransactionType
+metadata:
+  name: earnings-research
+  namespace: demo
+spec:
+  endpoint:
+    path: "/api/research"
+    method: "POST"
+  purpose: "earnings-analysis"
+  scope: "read:docs analyze:data"
+  tctxMapping:
+    company:
+      source: body
+      field: "company"
+      required: true
+    period:
+      source: body
+      field: "period"
+      required: true
+  tokenLifetime: "15s"
+---
+# ServiceTokenRequirement — what the retriever requires
+apiVersion: kontxt.io/v1alpha1
+kind: ServiceTokenRequirement
+metadata:
+  name: retriever
+  namespace: demo
+spec:
+  serviceRef:
+    name: retriever
+  verification:
+    requiredScope: "read:docs"
+    requiredTctxFields:
+      - "company"
+  excludedEndpoints:
+    - path: "/healthz"
+      method: "GET"
+---
+# ServiceTokenRequirement — what the analyzer requires
+apiVersion: kontxt.io/v1alpha1
+kind: ServiceTokenRequirement
+metadata:
+  name: analyzer
+  namespace: demo
+spec:
+  serviceRef:
+    name: analyzer
+  verification:
+    requiredScope: "analyze:data"
+    requiredTctxFields:
+      - "company"
+      - "period"
+  excludedEndpoints:
+    - path: "/healthz"
+      method: "GET"
+---
+# TokenPolicy — cluster-wide security guardrails
+apiVersion: kontxt.io/v1alpha1
+kind: TokenPolicy
+metadata:
+  name: demo-policy
+spec:
+  constraints:
+    maxTokenLifetime: "30s"
+    mandatoryTctxFields:
+      - "purpose"
