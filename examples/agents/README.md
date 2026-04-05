@@ -67,8 +67,16 @@ Then in another terminal:
 
 ### Step 1: Get an access token
 
+**bash/zsh:**
 ```bash
 TOKEN=$(curl -s http://localhost:8080/idp/token \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"alice@example.com","scope":"read:docs analyze:data"}' | jq -r .access_token)
+```
+
+**fish:**
+```fish
+set TOKEN (curl -s http://localhost:8080/idp/token \
   -H 'Content-Type: application/json' \
   -d '{"email":"alice@example.com","scope":"read:docs analyze:data"}' | jq -r .access_token)
 ```
@@ -142,7 +150,7 @@ curl -s -w "\n%{http_code}\n" http://localhost:8080/api/research \
 | `ServiceTokenRequirement` | `analyzer` | Requires scope `analyze:data` and tctx fields `company`+`period` |
 | `TokenPolicy` | `demo-policy` | Enforces max lifetime 30s and mandatory tctx field `purpose` |
 
-The kontxt controller reconciles these CRDs into ConfigMaps (`kontxt-generation-rules`, `kontxt-verification-rules`). The ext auth adapters watch these ConfigMaps via fsnotify and apply the rules automatically.
+The kontxt controller reconciles these CRDs and streams the compiled rules to ext auth adapters via gRPC. The ext auth adapters connect to the controller's RuleDiscoveryService and receive rule updates automatically.
 
 ## Cleanup
 

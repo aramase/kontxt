@@ -20,7 +20,7 @@ DEMO_NS="demo"
 
 # Auto-detect Podman vs Docker. Podman stores locally-built images with a
 # localhost/ prefix inside kind nodes; Docker does not.
-if docker version 2>&1 | grep -qi podman; then
+if docker version 2>&1 | grep -ci podman >/dev/null; then
   IMAGE_PREFIX="localhost/"
 else
   IMAGE_PREFIX=""
@@ -111,18 +111,17 @@ helm upgrade -i kontxt "${REPO_ROOT}/deploy/helm/kontxt" \
 echo "==> Applying kontxt CRD instances..."
 kubectl --context "${KUBE_CONTEXT}" apply -f "${SCRIPT_DIR}/manifests/kontxt-platform.yaml"
 
-# ---- 8. Wait for controller to reconcile CRDs into ConfigMaps ----
-echo "==> Waiting for generation rules ConfigMap..."
-until kubectl --context "${KUBE_CONTEXT}" get configmap kontxt-generation-rules -n "${KONTXT_NS}" -o jsonpath='{.data.rules\.json}' 2>/dev/null | grep -q '\['; do
-  sleep 2
-done
-echo "    generation rules ConfigMap ready"
+# ---- 8. Wait for controller to reconcile CRDs ----
+echo "==> Waiting for controller to reconcile CRDs..."
+kubectl --context "${KUBE_CONTEXT}" wait --for=condition=available deployment/kontxt-controller -n "${KONTXT_NS}" --timeout=60s
+sleep 3
+echo "    controller ready"
 
 # ---- 9. Deploy ext auth generate adapter ----
 echo "==> Deploying ext auth generate adapter..."
 kubectl --context "${KUBE_CONTEXT}" apply -f "${SCRIPT_DIR}/manifests/ext-auth-generate.yaml"
 if [ -n "${IMAGE_PREFIX}" ]; then
-  kubectl --context "${KUBE_CONTEXT}" -n "${KONTXT_NS}" set image deployment/kontxt-extauth-generate kontxt-extauth-generate="${IMAGE_PREFIX}kontxt-extauth:latest"
+  kubectl --context "${KUBE_CONTEXT}" -n "${KONTXT_NS}" set image deployment/kontxt-extauth-generate extauth="${IMAGE_PREFIX}kontxt-extauth:latest"
 fi
 
 # ---- 10. Apply gateway and routing ----
