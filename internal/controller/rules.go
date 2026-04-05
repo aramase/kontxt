@@ -57,6 +57,11 @@ type CELRule struct {
 	Message string `json:"message"`
 }
 
+// TODO(scalability): MarshalGenerationRules and MarshalVerificationRules serialize rules
+// into JSON for ConfigMap storage. ConfigMaps have a ~1MB size limit and volume mount
+// propagation delays. Replace with a gRPC/xDS push mechanism where the controller streams
+// rule updates directly to ext-auth instances.
+
 // MarshalGenerationRules serializes generation rules to JSON for ConfigMap storage.
 func MarshalGenerationRules(rules []GenerationRule) (string, error) {
 	data, err := json.MarshalIndent(rules, "", "  ")

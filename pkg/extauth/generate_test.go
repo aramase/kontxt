@@ -77,6 +77,10 @@ func setupGenerationTest(t *testing.T) (*GenerationServer, *keys.Manager, string
 }
 
 func genCheckRequest(path, method string, headers map[string]string, sourceIP, principal string) *authv3.CheckRequest {
+	return genCheckRequestWithBody(path, method, headers, sourceIP, principal, "")
+}
+
+func genCheckRequestWithBody(path, method string, headers map[string]string, sourceIP, principal, body string) *authv3.CheckRequest {
 	source := &authv3.AttributeContext_Peer{}
 	if sourceIP != "" {
 		source.Address = &corev3.Address{
@@ -98,6 +102,7 @@ func genCheckRequest(path, method string, headers map[string]string, sourceIP, p
 					Path:    path,
 					Method:  method,
 					Headers: headers,
+					Body:    body,
 				},
 			},
 			Source: source,
@@ -327,4 +332,125 @@ func TestGenerationServer_DeniedResponseIsJSON(t *testing.T) {
 
 	body := resp.GetDeniedResponse().GetBody()
 	assert.True(t, json.Valid([]byte(body)), "denied response body should be valid JSON")
+}
+
+func TestGenerationServer_TctxMappingBodyExtraction(t *testing.T) {
+	genServer, idpKeyMgr, idpURL := setupGenerationTest(t)
+
+	genServer.SetGenerationRules([]controller.GenerationRule{
+		{
+			Namespace: "demo",
+			Name:      "research",
+			Endpoint:  v1alpha1.EndpointSpec{Path: "/api/research", Method: "POST"},
+			Purpose:   "earnings-analysis",
+			Scope:     "read:docs analyze:data",
+			TctxMapping: map[string]v1alpha1.TctxFieldMapping{
+				"company": {Source: "body", Field: "company", Required: true},
+				"period":  {Source: "body", Field: "period", Required: true},
+			},
+		},
+	})
+
+	oauthToken := createOAuthToken(t, idpKeyMgr, idpURL)
+
+	resp, err := genServer.Check(context.Background(), genCheckRequestWithBody(
+		"/api/research", "POST",
+		map[string]string{"authorization": "Bearer " + oauthToken},
+		"10.0.0.42", "",
+		`{"company":"ACME","period":"Q3-2024","question":"Summarize earnings"}`,
+	))
+	require.NoError(t, err)
+
+	okResp := resp.GetOkResponse()
+	require.NotNil(t, okResp, "expected OkResponse")
+
+	var txTokenValue string
+	for _, h := range okResp.GetHeaders() {
+		if h.GetHeader().GetKey() == token.HeaderName {
+			txTokenValue = h.GetHeader().GetValue()
+		}
+	}
+	require.NotEmpty(t, txTokenValue)
+
+	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
+	parsed, _, err := parser.ParseUnverified(txTokenValue, jwt.MapClaims{})
+	require.NoError(t, err)
+	claims := parsed.Claims.(jwt.MapClaims)
+
+	tctx, ok := claims["tctx"].(map[string]any)
+	require.True(t, ok, "tctx claim should be a map")
+	assert.Equal(t, "ACME", tctx["company"])
+	assert.Equal(t, "Q3-2024", tctx["period"])
+	assert.Equal(t, "earnings-analysis", tctx["purpose"])
+}
+
+func TestGenerationServer_TctxMappingRequiredFieldMissing(t *testing.T) {
+	genServer, idpKeyMgr, idpURL := setupGenerationTest(t)
+
+	genServer.SetGenerationRules([]controller.GenerationRule{
+		{
+			Endpoint: v1alpha1.EndpointSpec{Path: "/api/research", Method: "POST"},
+			Purpose:  "analysis",
+			Scope:    "read:data",
+			TctxMapping: map[string]v1alpha1.TctxFieldMapping{
+				"company": {Source: "body", Field: "company", Required: true},
+			},
+		},
+	})
+
+	oauthToken := createOAuthToken(t, idpKeyMgr, idpURL)
+
+	// Body missing the required "company" field
+	resp, err := genServer.Check(context.Background(), genCheckRequestWithBody(
+		"/api/research", "POST",
+		map[string]string{"authorization": "Bearer " + oauthToken},
+		"10.0.0.42", "",
+		`{"period":"Q3-2024"}`,
+	))
+	require.NoError(t, err)
+	assert.NotNil(t, resp.GetDeniedResponse(), "should deny when required tctx field is missing")
+}
+
+func TestGenerationServer_TctxMappingQueryExtraction(t *testing.T) {
+	genServer, idpKeyMgr, idpURL := setupGenerationTest(t)
+
+	genServer.SetGenerationRules([]controller.GenerationRule{
+		{
+			Endpoint: v1alpha1.EndpointSpec{Path: "/api/retrieve", Method: "GET"},
+			Purpose:  "retrieval",
+			Scope:    "read:docs",
+			TctxMapping: map[string]v1alpha1.TctxFieldMapping{
+				"company": {Source: "query", Field: "company", Required: false},
+			},
+		},
+	})
+
+	oauthToken := createOAuthToken(t, idpKeyMgr, idpURL)
+
+	resp, err := genServer.Check(context.Background(), genCheckRequest(
+		"/api/retrieve?company=ACME", "GET",
+		map[string]string{"authorization": "Bearer " + oauthToken},
+		"10.0.0.42", "",
+	))
+	require.NoError(t, err)
+
+	okResp := resp.GetOkResponse()
+	require.NotNil(t, okResp)
+
+	var txTokenValue string
+	for _, h := range okResp.GetHeaders() {
+		if h.GetHeader().GetKey() == token.HeaderName {
+			txTokenValue = h.GetHeader().GetValue()
+		}
+	}
+	require.NotEmpty(t, txTokenValue)
+
+	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
+	parsed, _, err := parser.ParseUnverified(txTokenValue, jwt.MapClaims{})
+	require.NoError(t, err)
+	claims := parsed.Claims.(jwt.MapClaims)
+
+	tctx, ok := claims["tctx"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "ACME", tctx["company"])
 }

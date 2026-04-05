@@ -4,30 +4,44 @@ set -euo pipefail
 # ============================================================
 # setup.sh — Deploy the kontxt AI Research Assistant demo
 # ============================================================
-# Prerequisites: az, kubectl, helm, docker (or az acr build)
+# Prerequisites: docker, kind, kubectl, helm
 #
 # Usage:
-#   export ACR_NAME=myregistry        # Azure Container Registry name
-#   ./setup.sh
+#   ./setup.sh                          # creates a new kind cluster
+#   KIND_CLUSTER_NAME=my-cluster ./setup.sh  # use an existing cluster
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-: "${ACR_NAME:?Set ACR_NAME to your Azure Container Registry name (e.g. myregistry)}"
-ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
-
+KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-kontxt-demo}"
 KONTXT_NS="kontxt-system"
 DEMO_NS="demo"
 
-echo "==> ACR: ${ACR_LOGIN_SERVER}"
+# Auto-detect Podman vs Docker. Podman stores locally-built images with a
+# localhost/ prefix inside kind nodes; Docker does not.
+if docker version 2>&1 | grep -qi podman; then
+  IMAGE_PREFIX="localhost/"
+else
+  IMAGE_PREFIX=""
+fi
+
+echo "==> Kind cluster: ${KIND_CLUSTER_NAME}"
 echo "==> Repo root: ${REPO_ROOT}"
+echo "==> Image prefix: '${IMAGE_PREFIX}'"
 echo ""
 
-# ---- 1. Build and push images ----
-echo "==> Logging in to ACR..."
-az acr login --name "${ACR_NAME}"
+# ---- 1. Create kind cluster (if it doesn't exist) ----
+if kind get clusters 2>/dev/null | grep -q "^${KIND_CLUSTER_NAME}$"; then
+  echo "==> Kind cluster '${KIND_CLUSTER_NAME}' already exists, reusing"
+else
+  echo "==> Creating kind cluster '${KIND_CLUSTER_NAME}'..."
+  kind create cluster --name "${KIND_CLUSTER_NAME}" --wait 60s
+fi
 
+KUBE_CONTEXT="kind-${KIND_CLUSTER_NAME}"
+
+# ---- 2. Build and load images ----
 IMAGES=(
   "kontxt-tts:cmd/tts/Dockerfile"
   "kontxt-extauth:cmd/extauth/Dockerfile"
@@ -41,117 +55,120 @@ IMAGES=(
 for entry in "${IMAGES[@]}"; do
   IMAGE_NAME="${entry%%:*}"
   DOCKERFILE="${entry##*:}"
-  TAG="${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest"
-  echo "==> Building ${IMAGE_NAME}..."
+  TAG="${IMAGE_NAME}:latest"
+  echo "==> Building ${TAG}..."
   docker build -t "${TAG}" -f "${REPO_ROOT}/${DOCKERFILE}" "${REPO_ROOT}"
-  echo "==> Pushing ${TAG}..."
-  docker push "${TAG}"
+  echo "==> Loading ${TAG} into kind..."
+  kind load docker-image "${TAG}" --name "${KIND_CLUSTER_NAME}"
 done
 
-# ---- 2. Install Gateway API CRDs ----
+# ---- 3. Install Gateway API CRDs ----
 echo "==> Installing Gateway API CRDs..."
-kubectl apply --server-side --force-conflicts \
+kubectl --context "${KUBE_CONTEXT}" apply --server-side --force-conflicts \
   -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.0/standard-install.yaml
 
-# ---- 3. Install AgentGateway ----
+# ---- 4. Install AgentGateway ----
 echo "==> Installing AgentGateway..."
 helm upgrade -i agentgateway-crds oci://cr.agentgateway.dev/charts/agentgateway-crds \
+  --kube-context "${KUBE_CONTEXT}" \
   --create-namespace --namespace agentgateway-system \
   --version v1.0.1
 
 helm upgrade -i agentgateway oci://cr.agentgateway.dev/charts/agentgateway \
+  --kube-context "${KUBE_CONTEXT}" \
   --namespace agentgateway-system \
   --version v1.0.1 \
   --wait
 
-# ---- 4. Install kontxt ----
+# ---- 5. Deploy demo namespace and services ----
+# The mock-idp Service must exist before kontxt installs, so TTS can
+# resolve the IdP's OIDC discovery URL on first token exchange.
+echo "==> Creating demo namespace and deploying services..."
+kubectl --context "${KUBE_CONTEXT}" apply -f "${SCRIPT_DIR}/manifests/namespace.yaml"
+kubectl --context "${KUBE_CONTEXT}" apply -f "${SCRIPT_DIR}/manifests/services.yaml"
+if [ -n "${IMAGE_PREFIX}" ]; then
+  for dep in mock-idp orchestrator retriever analyzer; do
+    kubectl --context "${KUBE_CONTEXT}" -n "${DEMO_NS}" set image "deployment/${dep}" "${dep}=${IMAGE_PREFIX}kontxt-${dep}:latest"
+  done
+fi
+
+# ---- 6. Install kontxt ----
 echo "==> Installing kontxt CRDs and platform..."
 helm upgrade -i kontxt "${REPO_ROOT}/deploy/helm/kontxt" \
+  --kube-context "${KUBE_CONTEXT}" \
   --create-namespace --namespace "${KONTXT_NS}" \
-  --set tts.config.trustDomain=demo.example.com \
+  -f "${SCRIPT_DIR}/helm-values.yaml" \
   --set "tts.config.issuer=https://kontxt-tts.${KONTXT_NS}.svc.cluster.local" \
-  --set "tts.image.repository=${ACR_LOGIN_SERVER}/kontxt-tts" \
-  --set "extauth.image.repository=${ACR_LOGIN_SERVER}/kontxt-extauth" \
-  --set "controller.image.repository=${ACR_LOGIN_SERVER}/kontxt-controller" \
+  --set "tts.image.repository=${IMAGE_PREFIX}kontxt-tts" \
+  --set "tts.image.pullPolicy=Never" \
+  --set "extauth.image.repository=${IMAGE_PREFIX}kontxt-extauth" \
+  --set "extauth.image.pullPolicy=Never" \
+  --set "controller.image.repository=${IMAGE_PREFIX}kontxt-controller" \
+  --set "controller.image.pullPolicy=Never" \
   --wait
-
-# ---- 5. Deploy ext auth generate adapter ----
-echo "==> Deploying ext auth generate adapter..."
-# Patch the image in the manifest to use ACR
-sed "s|ghcr.io/aramase/kontxt-extauth:latest|${ACR_LOGIN_SERVER}/kontxt-extauth:latest|g" \
-  "${SCRIPT_DIR}/manifests/ext-auth-generate.yaml" | kubectl apply -f -
-
-# ---- 6. Deploy demo services ----
-echo "==> Creating demo namespace and services..."
-kubectl apply -f "${SCRIPT_DIR}/manifests/namespace.yaml"
-
-# Patch demo service images to use ACR
-for svc in mock-idp orchestrator retriever analyzer; do
-  sed "s|ghcr.io/aramase/kontxt-${svc}:latest|${ACR_LOGIN_SERVER}/kontxt-${svc}:latest|g" \
-    "${SCRIPT_DIR}/manifests/services.yaml"
-done | sort -u | kubectl apply -f -
 
 # ---- 7. Apply kontxt CRD instances ----
 echo "==> Applying kontxt CRD instances..."
-kubectl apply -f "${SCRIPT_DIR}/manifests/kontxt-platform.yaml"
+kubectl --context "${KUBE_CONTEXT}" apply -f "${SCRIPT_DIR}/manifests/kontxt-platform.yaml"
 
-# ---- 8. Apply gateway and routing ----
-echo "==> Applying gateway, routes, and ext_authz policies..."
-kubectl apply -f "${SCRIPT_DIR}/manifests/gateway.yaml"
-
-# ---- 9. Wait for pods ----
-echo "==> Waiting for kontxt-system pods..."
-kubectl rollout status deployment/kontxt-tts -n "${KONTXT_NS}" --timeout=120s
-kubectl rollout status deployment/kontxt-extauth -n "${KONTXT_NS}" --timeout=120s
-kubectl rollout status deployment/kontxt-controller -n "${KONTXT_NS}" --timeout=120s
-kubectl rollout status deployment/kontxt-extauth-generate -n "${KONTXT_NS}" --timeout=120s
-
-echo "==> Waiting for demo pods..."
-kubectl rollout status deployment/mock-idp -n "${DEMO_NS}" --timeout=120s
-kubectl rollout status deployment/orchestrator -n "${DEMO_NS}" --timeout=120s
-kubectl rollout status deployment/retriever -n "${DEMO_NS}" --timeout=120s
-kubectl rollout status deployment/analyzer -n "${DEMO_NS}" --timeout=120s
-
-# ---- 10. Print gateway address and curl examples ----
-echo ""
-echo "==> Waiting for gateway address..."
-for i in $(seq 1 30); do
-  GW_ADDRESS=$(kubectl get gateway demo-gateway -n "${DEMO_NS}" \
-    -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || true)
-  if [ -n "${GW_ADDRESS}" ]; then
-    break
-  fi
+# ---- 8. Wait for controller to reconcile CRDs into ConfigMaps ----
+echo "==> Waiting for generation rules ConfigMap..."
+until kubectl --context "${KUBE_CONTEXT}" get configmap kontxt-generation-rules -n "${KONTXT_NS}" -o jsonpath='{.data.rules\.json}' 2>/dev/null | grep -q '\['; do
   sleep 2
 done
+echo "    generation rules ConfigMap ready"
 
-if [ -z "${GW_ADDRESS:-}" ]; then
-  echo "WARNING: Gateway address not yet available. Check: kubectl get gateway demo-gateway -n demo"
-  GW_ADDRESS="<pending>"
+# ---- 9. Deploy ext auth generate adapter ----
+echo "==> Deploying ext auth generate adapter..."
+kubectl --context "${KUBE_CONTEXT}" apply -f "${SCRIPT_DIR}/manifests/ext-auth-generate.yaml"
+if [ -n "${IMAGE_PREFIX}" ]; then
+  kubectl --context "${KUBE_CONTEXT}" -n "${KONTXT_NS}" set image deployment/kontxt-extauth-generate kontxt-extauth-generate="${IMAGE_PREFIX}kontxt-extauth:latest"
 fi
 
+# ---- 10. Apply gateway and routing ----
+echo "==> Applying gateway, routes, and ext_authz policies..."
+kubectl --context "${KUBE_CONTEXT}" apply -f "${SCRIPT_DIR}/manifests/gateway.yaml"
+
+# ---- 11. Wait for pods ----
+echo "==> Waiting for kontxt-system pods..."
+kubectl --context "${KUBE_CONTEXT}" rollout status deployment/kontxt-tts -n "${KONTXT_NS}" --timeout=120s
+kubectl --context "${KUBE_CONTEXT}" rollout status deployment/kontxt-extauth -n "${KONTXT_NS}" --timeout=120s
+kubectl --context "${KUBE_CONTEXT}" rollout status deployment/kontxt-controller -n "${KONTXT_NS}" --timeout=120s
+kubectl --context "${KUBE_CONTEXT}" rollout status deployment/kontxt-extauth-generate -n "${KONTXT_NS}" --timeout=120s
+
+echo "==> Waiting for demo pods..."
+kubectl --context "${KUBE_CONTEXT}" rollout status deployment/mock-idp -n "${DEMO_NS}" --timeout=120s
+kubectl --context "${KUBE_CONTEXT}" rollout status deployment/orchestrator -n "${DEMO_NS}" --timeout=120s
+kubectl --context "${KUBE_CONTEXT}" rollout status deployment/retriever -n "${DEMO_NS}" --timeout=120s
+kubectl --context "${KUBE_CONTEXT}" rollout status deployment/analyzer -n "${DEMO_NS}" --timeout=120s
+
+# ---- 11. Print test instructions ----
 echo ""
 echo "============================================"
 echo "  Demo deployed successfully!"
 echo "============================================"
 echo ""
-echo "Gateway address: ${GW_ADDRESS}"
+echo "To test, port-forward to the gateway:"
+echo ""
+echo "  kubectl --context ${KUBE_CONTEXT} port-forward -n ${DEMO_NS} svc/demo-gateway 8080:80"
+echo ""
+echo "Then in another terminal:"
 echo ""
 echo "1. Get an access token from the mock IdP:"
 echo ""
-echo "   TOKEN=\$(curl -s http://${GW_ADDRESS}/idp/token \\"
+echo "   TOKEN=\$(curl -s http://localhost:8080/idp/token \\"
 echo "     -H 'Content-Type: application/json' \\"
 echo "     -d '{\"email\":\"alice@example.com\",\"scope\":\"read:docs analyze:data\"}' | jq -r .access_token)"
 echo ""
 echo "2. Send a research request:"
 echo ""
-echo "   curl -s http://${GW_ADDRESS}/api/research \\"
+echo "   curl -s http://localhost:8080/api/research \\"
 echo "     -H \"Authorization: Bearer \$TOKEN\" \\"
 echo "     -H 'Content-Type: application/json' \\"
 echo "     -d '{\"company\":\"ACME\",\"period\":\"Q3-2024\",\"question\":\"Summarize earnings\"}' | jq ."
 echo ""
 echo "3. Check logs for TxToken propagation:"
 echo ""
-echo "   kubectl logs -n demo -l app=orchestrator --tail=10"
-echo "   kubectl logs -n demo -l app=retriever --tail=10"
-echo "   kubectl logs -n demo -l app=analyzer --tail=10"
+echo "   kubectl --context ${KUBE_CONTEXT} logs -n ${DEMO_NS} -l app=retriever --tail=10"
+echo "   kubectl --context ${KUBE_CONTEXT} logs -n ${DEMO_NS} -l app=analyzer --tail=10"
 echo ""
