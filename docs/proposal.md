@@ -674,7 +674,7 @@ The controller reconciles all four CRD types and produces two outputs:
 For each `TransactionType`, the controller:
 - Validates against applicable `TokenPolicy` (lifetime ≤ ceiling, mandatory fields present, namespace authorized, enrichers allowed)
 - Computes the full generation rule: endpoint match, tctxMapping, enrichments, rctx fields, scope, lifetime
-- Pushes to TTS via ConfigMap (POC) or direct API (production)
+- Pushes to TTS via ConfigMap (POC) or gRPC streaming (production — see [Rule Distribution via gRPC](#production-rule-distribution-via-grpc))
 
 **2. Verification rules → ext auth adapter**
 
@@ -682,7 +682,7 @@ For each `ServiceTokenRequirement`, the controller:
 - Validates the service exists in the namespace
 - Compiles CEL expressions and checks them for type errors
 - Computes the verification rule: required scope, required tctx fields, compiled CEL rules, excluded endpoints
-- Pushes to the TxToken Ext Auth Adapter via ConfigMap (POC) or direct API (production)
+- Pushes to the TxToken Ext Auth Adapter via ConfigMap (POC) or gRPC streaming (production — see [Rule Distribution via gRPC](#production-rule-distribution-via-grpc))
 
 **3. CEL compilation and distribution**
 
@@ -1084,6 +1084,26 @@ Step 6: "Each hop has least-privilege scope and external policy enforcement"
 
 ---
 
+## Production: Rule Distribution via gRPC
+
+The POC uses ConfigMaps to distribute generation and verification rules from the controller to the TTS and ext auth adapter. This has three scaling limits:
+
+1. **~1 MB size ceiling.** Kubernetes enforces a hard limit per ConfigMap. All generation rules (every `TransactionType` across all namespaces) are serialized into a single ConfigMap, as are all verification rules. In a large cluster with hundreds of transaction types, JSON-serialized rules can approach this limit.
+2. **Full-rebuild on every change.** Any single `TransactionType` or `ServiceTokenRequirement` change triggers a complete re-serialization and ConfigMap update — not an incremental patch.
+3. **Mount propagation delay.** ConfigMap volume mounts are synced by the kubelet on a best-effort cadence (typically 10–60 seconds). During this window, ext auth instances serve stale rules.
+
+For production, the controller will expose a **custom gRPC streaming service** (`RuleDiscoveryService`) that pushes rule updates directly to connected ext auth instances. The migration surface is small:
+
+- **Controller side:** Replace `ensureConfigMap()` calls with stream pushes to connected clients. The reconciliation logic and rule data structures (`GenerationRule`, `VerificationRule`) remain unchanged.
+- **Ext auth side:** Replace `RulesLoader.WatchAndReload()` (fsnotify file watcher) with a gRPC client that calls the existing `SetGenerationRules()` / `SetVerificationRules()` setters on each received message. The mutex-protected setter pattern already exists.
+- **Wire format:** Proto messages mirror the existing Go structs. A `StreamRules` RPC with a `oneof {full_snapshot, delta}` message covers both initial sync and incremental updates.
+
+**Why custom gRPC over xDS for the initial migration:** The xDS protocol (used by Envoy, Istio, and the service mesh ecosystem) provides battle-tested versioning, ACK/NACK, and incremental delta semantics. However, it is designed for Envoy's resource model (Clusters, Listeners, Routes, Secrets) — custom resource types work but are bolted-on. The `go-control-plane` library brings ~15+ transitive dependencies (Envoy API protos, gRPC, protobuf), and the incremental xDS state machine (snapshot cache, version tracking, node hashing) adds complexity that doesn't pay off when the resource model is two flat rule arrays. A custom gRPC service is ~200–300 lines of proto + server + client, with full control over the wire format and no external dependencies beyond standard gRPC.
+
+**Future: xDS compatibility layer.** If kontxt integrates directly with Envoy or Istio sidecars — for example, distributing verification rules to Envoy's ext_authz filter natively rather than through a standalone adapter — an xDS-compatible facade can be layered on top of the gRPC service. The proto messages would be wrapped as custom xDS resource types (with proper type URLs and version tracking) without changing the controller's core reconciliation logic or the rule data model. This keeps the door open for native service mesh integration without paying the xDS complexity cost upfront.
+
+---
+
 ## Design Principles
 
 1. **IdP-agnostic.** The TTS validates subject tokens via standard OIDC discovery. Any OIDC-compliant IdP works out of the box. Adding a new IdP type is implementing one Go interface.
@@ -1092,7 +1112,7 @@ Step 6: "Each hop has least-privilege scope and external policy enforcement"
 
 3. **Separation of concerns.** Four CRDs, four personas, four RBAC boundaries. Platform admin configures infrastructure. Security admin sets guardrails. Transaction owner defines generation rules. Service owner defines verification requirements. The controller joins them and surfaces mismatches.
 
-4. **Kubernetes-native.** Configuration is CRDs. Policy is CEL. Traffic routing is Gateway API. Rule distribution is ConfigMaps. Operators use `kubectl`, Helm, Kustomize, GitOps. Everything is auditable via the Kubernetes API.
+4. **Kubernetes-native.** Configuration is CRDs. Policy is CEL. Traffic routing is Gateway API. Rule distribution is ConfigMaps (POC), migrating to gRPC streaming (production). Operators use `kubectl`, Helm, Kustomize, GitOps. Everything is auditable via the Kubernetes API.
 
 5. **Incremental value.** Each step works independently. You can stop at Step 2 and have a useful library. You can stop at Step 4 and have transparent generation + verification. Each step is demo-able and pitch-able.
 

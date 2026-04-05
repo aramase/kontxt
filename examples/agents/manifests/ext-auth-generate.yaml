@@ -40,15 +40,11 @@ spec:
             - --jwks=http://kontxt-tts.kontxt-system.svc.cluster.local/.well-known/jwks.json
             - --trust-domain=demo.example.com
             - --mode=generate
-            - --rules-file=/etc/kontxt/rules/rules.json
+            - --controller-addr=kontxt-controller.kontxt-system.svc.cluster.local:9090
           ports:
             - containerPort: 9000
               name: grpc
               protocol: TCP
-          volumeMounts:
-            - name: generation-rules
-              mountPath: /etc/kontxt/rules
-              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -56,11 +52,6 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
-      volumes:
-        - name: generation-rules
-          configMap:
-            name: kontxt-generation-rules
-            optional: true
 ---
 apiVersion: v1
 kind: Service

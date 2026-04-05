@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -55,47 +54,6 @@ type CELRule struct {
 	Name    string `json:"name"`
 	CEL     string `json:"cel"`
 	Message string `json:"message"`
-}
-
-// TODO(scalability): MarshalGenerationRules and MarshalVerificationRules serialize rules
-// into JSON for ConfigMap storage. ConfigMaps have a ~1MB size limit and volume mount
-// propagation delays. Replace with a gRPC/xDS push mechanism where the controller streams
-// rule updates directly to ext-auth instances.
-
-// MarshalGenerationRules serializes generation rules to JSON for ConfigMap storage.
-func MarshalGenerationRules(rules []GenerationRule) (string, error) {
-	data, err := json.MarshalIndent(rules, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("marshaling generation rules: %w", err)
-	}
-	return string(data), nil
-}
-
-// UnmarshalGenerationRules deserializes generation rules from JSON.
-func UnmarshalGenerationRules(data string) ([]GenerationRule, error) {
-	var rules []GenerationRule
-	if err := json.Unmarshal([]byte(data), &rules); err != nil {
-		return nil, fmt.Errorf("unmarshaling generation rules: %w", err)
-	}
-	return rules, nil
-}
-
-// MarshalVerificationRules serializes verification rules to JSON for ConfigMap storage.
-func MarshalVerificationRules(rules []VerificationRule) (string, error) {
-	data, err := json.MarshalIndent(rules, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("marshaling verification rules: %w", err)
-	}
-	return string(data), nil
-}
-
-// UnmarshalVerificationRules deserializes verification rules from JSON.
-func UnmarshalVerificationRules(data string) ([]VerificationRule, error) {
-	var rules []VerificationRule
-	if err := json.Unmarshal([]byte(data), &rules); err != nil {
-		return nil, fmt.Errorf("unmarshaling verification rules: %w", err)
-	}
-	return rules, nil
 }
 
 // ValidateTransactionTypeAgainstPolicy checks a TransactionType against a TokenPolicy.

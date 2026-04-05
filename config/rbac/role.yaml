@@ -5,17 +5,6 @@ metadata:
   name: kontxt-controller
 rules:
 - apiGroups:
-  - ""
-  resources:
-  - configmaps
-  verbs:
-  - create
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
   - kontxt.io
   resources:
   - servicetokenrequirements

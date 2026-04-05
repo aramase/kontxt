@@ -185,63 +185,6 @@ func TestClampTokenLifetime(t *testing.T) {
 	}
 }
 
-func TestMarshalUnmarshalGenerationRules(t *testing.T) {
-	rules := []GenerationRule{
-		{
-			Namespace: "team-alpha",
-			Name:      "analyze-dataset",
-			Endpoint:  v1alpha1.EndpointSpec{Path: "/api/v1/analyze", Method: "POST"},
-			Purpose:   "analysis",
-			Scope:     "read:data",
-			TctxMapping: map[string]v1alpha1.TctxFieldMapping{
-				"datasetId": {Source: "path", Field: "datasetId", Required: true},
-			},
-			TokenLifetime: "15s",
-		},
-	}
-
-	data, err := MarshalGenerationRules(rules)
-	require.NoError(t, err)
-	assert.Contains(t, data, "analyze-dataset")
-
-	decoded, err := UnmarshalGenerationRules(data)
-	require.NoError(t, err)
-	require.Len(t, decoded, 1)
-	assert.Equal(t, "team-alpha", decoded[0].Namespace)
-	assert.Equal(t, "analysis", decoded[0].Purpose)
-	assert.True(t, decoded[0].TctxMapping["datasetId"].Required)
-}
-
-func TestMarshalUnmarshalVerificationRules(t *testing.T) {
-	rules := []VerificationRule{
-		{
-			Namespace:          "team-beta",
-			Name:               "storage-reqs",
-			ServiceName:        "storage-service",
-			RequiredScope:      "read:datasets",
-			RequiredTctxFields: []string{"datasetId", "classification"},
-			CELRules: []CELRule{
-				{Name: "public-only", CEL: `txtoken.tctx.classification == "public"`, Message: "public only"},
-			},
-			ExcludedEndpoints: []v1alpha1.EndpointSpec{
-				{Path: "/healthz", Method: "GET"},
-			},
-			AutoNarrow: true,
-		},
-	}
-
-	data, err := MarshalVerificationRules(rules)
-	require.NoError(t, err)
-
-	decoded, err := UnmarshalVerificationRules(data)
-	require.NoError(t, err)
-	require.Len(t, decoded, 1)
-	assert.Equal(t, "storage-service", decoded[0].ServiceName)
-	assert.True(t, decoded[0].AutoNarrow)
-	assert.Len(t, decoded[0].CELRules, 1)
-	assert.Equal(t, "public-only", decoded[0].CELRules[0].Name)
-}
-
 func TestSetCondition_Add(t *testing.T) {
 	var conditions []metav1.Condition
 

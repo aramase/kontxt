@@ -2,14 +2,11 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -18,31 +15,28 @@ import (
 )
 
 const (
-	// ConfigMapNameGenerationRules is the ConfigMap name for generation rules.
-	ConfigMapNameGenerationRules = "kontxt-generation-rules"
-	// ConfigMapNameVerificationRules is the ConfigMap name for verification rules.
-	ConfigMapNameVerificationRules = "kontxt-verification-rules"
-	// ConfigMapNamespace is where rule ConfigMaps are created.
-	ConfigMapNamespace = "kontxt-system"
-	// ConfigMapDataKey is the data key within the ConfigMap.
-	ConfigMapDataKey = "rules.json"
-
 	// ConditionPolicyCompliant is the condition type for policy compliance.
 	ConditionPolicyCompliant = "PolicyCompliant"
 	// ConditionReady is the condition type for readiness.
 	ConditionReady = "Ready"
 )
 
+// RulePublisher is implemented by ruleserver.RuleServer to push rules to ext-auth instances.
+type RulePublisher interface {
+	UpdateGenerationRules(rules []GenerationRule)
+	UpdateVerificationRules(rules []VerificationRule)
+}
+
 // TransactionTypeReconciler reconciles TransactionType objects.
 type TransactionTypeReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme        *runtime.Scheme
+	RulePublisher RulePublisher
 }
 
 // +kubebuilder:rbac:groups=kontxt.io,resources=transactiontypes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=kontxt.io,resources=transactiontypes/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=kontxt.io,resources=tokenpolicies,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch
 
 func (r *TransactionTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -134,12 +128,10 @@ func (r *TransactionTypeReconciler) rebuildGenerationRules(ctx context.Context) 
 		})
 	}
 
-	rulesJSON, err := MarshalGenerationRules(rules)
-	if err != nil {
-		return err
+	if r.RulePublisher != nil {
+		r.RulePublisher.UpdateGenerationRules(rules)
 	}
-
-	return r.ensureConfigMap(ctx, ConfigMapNameGenerationRules, rulesJSON)
+	return nil
 }
 
 // findApplicablePolicy finds the TokenPolicy that applies to the given namespace.
@@ -170,35 +162,6 @@ func (r *TransactionTypeReconciler) findApplicablePolicy(ctx context.Context, na
 	return nil, nil
 }
 
-// ensureConfigMap creates or updates a ConfigMap with the given data.
-func (r *TransactionTypeReconciler) ensureConfigMap(ctx context.Context, name, data string) error {
-	cm := &corev1.ConfigMap{}
-	key := types.NamespacedName{Name: name, Namespace: ConfigMapNamespace}
-
-	err := r.Get(ctx, key, cm)
-	if errors.IsNotFound(err) {
-		cm = &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: ConfigMapNamespace,
-			},
-			Data: map[string]string{
-				ConfigMapDataKey: data,
-			},
-		}
-		return r.Create(ctx, cm)
-	}
-	if err != nil {
-		return err
-	}
-
-	if cm.Data == nil {
-		cm.Data = make(map[string]string)
-	}
-	cm.Data[ConfigMapDataKey] = data
-	return r.Update(ctx, cm)
-}
-
 func (r *TransactionTypeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.TransactionType{}).
@@ -208,12 +171,12 @@ func (r *TransactionTypeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // ServiceTokenRequirementReconciler reconciles ServiceTokenRequirement objects.
 type ServiceTokenRequirementReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme        *runtime.Scheme
+	RulePublisher RulePublisher
 }
 
 // +kubebuilder:rbac:groups=kontxt.io,resources=servicetokenrequirements,verbs=get;list;watch
 // +kubebuilder:rbac:groups=kontxt.io,resources=servicetokenrequirements/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch
 
 func (r *ServiceTokenRequirementReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -285,38 +248,10 @@ func (r *ServiceTokenRequirementReconciler) rebuildVerificationRules(ctx context
 		})
 	}
 
-	rulesJSON, err := MarshalVerificationRules(rules)
-	if err != nil {
-		return err
+	if r.RulePublisher != nil {
+		r.RulePublisher.UpdateVerificationRules(rules)
 	}
-
-	return r.ensureConfigMap(ctx, ConfigMapNameVerificationRules, rulesJSON)
-}
-
-func (r *ServiceTokenRequirementReconciler) ensureConfigMap(ctx context.Context, name, data string) error {
-	cm := &corev1.ConfigMap{}
-	key := types.NamespacedName{Name: name, Namespace: ConfigMapNamespace}
-
-	err := r.Get(ctx, key, cm)
-	if errors.IsNotFound(err) {
-		cm = &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: ConfigMapNamespace,
-			},
-			Data: map[string]string{ConfigMapDataKey: data},
-		}
-		return r.Create(ctx, cm)
-	}
-	if err != nil {
-		return err
-	}
-
-	if cm.Data == nil {
-		cm.Data = make(map[string]string)
-	}
-	cm.Data[ConfigMapDataKey] = data
-	return r.Update(ctx, cm)
+	return nil
 }
 
 func (r *ServiceTokenRequirementReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -356,13 +291,4 @@ func setCondition(conditions *[]metav1.Condition, condType string, status metav1
 		Message:            message,
 		LastTransitionTime: now,
 	})
-}
-
-// MarshalRulesJSON is a helper to marshal any rules to JSON (used by ConfigMap data).
-func MarshalRulesJSON(v any) (string, error) {
-	data, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
 }
