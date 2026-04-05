@@ -1,4 +1,4 @@
-//go:build e2e
+//go:build e2e || agents_e2e
 
 package e2e
 
@@ -25,6 +25,17 @@ var (
 	repoRoot string
 	ttsURL   string // set after port-forward
 )
+
+// imagePrefix returns "localhost/" when the container runtime is Podman,
+// empty string for Docker. Podman stores locally-built images with a
+// localhost/ prefix inside kind nodes; Docker does not.
+func imagePrefix() string {
+	out, err := runCmdOutput("docker", "version")
+	if err == nil && strings.Contains(strings.ToLower(out), "podman") {
+		return "localhost/"
+	}
+	return ""
+}
 
 // setupClusterForTestMain creates the kind cluster for TestMain (no *testing.T).
 func setupClusterForTestMain() error {
@@ -77,6 +88,15 @@ func setupClusterForTestMain() error {
 	fmt.Println("Deploying TTS...")
 	if err := runCmdNoTest("kubectl", "--context", "kind-"+clusterName, "apply", "-f", filepath.Join(repoRoot, "test/e2e/testdata/tts-deployment.yaml")); err != nil {
 		return fmt.Errorf("deploying TTS: %w", err)
+	}
+
+	// Patch image with runtime-specific prefix (Podman uses localhost/).
+	prefix := imagePrefix()
+	if prefix != "" {
+		if err := runCmdNoTest("kubectl", "--context", "kind-"+clusterName, "-n", namespace,
+			"set", "image", "deployment/kontxt-tts", "tts="+prefix+"kontxt-tts:e2e"); err != nil {
+			return fmt.Errorf("patching TTS image prefix: %w", err)
+		}
 	}
 
 	fmt.Println("Waiting for TTS to be ready...")

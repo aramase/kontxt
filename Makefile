@@ -1,4 +1,4 @@
-.PHONY: all build test test-e2e lint clean docker helm generate manifests verify-codegen
+.PHONY: all build test test-e2e test-agents-e2e lint clean docker helm generate manifests verify-codegen
 
 CONTROLLER_GEN ?= $(shell which controller-gen)
 
@@ -34,6 +34,13 @@ test-e2e:
 
 test-e2e-keep:
 	KONTXT_E2E=1 KONTXT_E2E_KEEP_CLUSTER=1 go test -tags e2e ./test/e2e/ -v -count=1 -timeout 10m
+
+# Agents E2E tests (requires Docker/Podman + kind + helm)
+test-agents-e2e:
+	KONTXT_AGENTS_E2E=1 go test -tags agents_e2e ./test/e2e/ -v -count=1 -timeout 15m
+
+test-agents-e2e-keep:
+	KONTXT_AGENTS_E2E=1 KONTXT_E2E_KEEP_CLUSTER=1 go test -tags agents_e2e ./test/e2e/ -v -count=1 -timeout 15m
 
 # Lint
 lint:

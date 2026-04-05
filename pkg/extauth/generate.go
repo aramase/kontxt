@@ -2,7 +2,9 @@ package extauth
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -10,6 +12,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 
+	"github.com/aramase/kontxt/api/v1alpha1"
 	"github.com/aramase/kontxt/internal/controller"
 	"github.com/aramase/kontxt/pkg/token"
 	sdktts "github.com/aramase/kontxt/sdk/tts"
@@ -98,8 +101,23 @@ func (s *GenerationServer) Check(ctx context.Context, req *authv3.CheckRequest) 
 	requestDetails := map[string]any{
 		"purpose": rule.Purpose,
 	}
-	// In a full implementation, we'd extract fields from the request per tctxMapping.
-	// For this phase, we include the purpose and any static fields.
+	// Extract tctx fields from the request based on tctxMapping.
+	for fieldName, mapping := range rule.TctxMapping {
+		val, err := extractTctxField(httpReq, mapping)
+		if err != nil {
+			if mapping.Required {
+				return denied(codes.InvalidArgument,
+					fmt.Sprintf("required tctx field %q extraction failed: %v", fieldName, err)), nil
+			}
+			continue
+		}
+		if val != "" {
+			requestDetails[fieldName] = val
+		} else if mapping.Required {
+			return denied(codes.InvalidArgument,
+				fmt.Sprintf("required tctx field %q is missing", fieldName)), nil
+		}
+	}
 
 	// Build request context (rctx)
 	requestContext := map[string]any{}
@@ -185,6 +203,50 @@ func extractSourceAddress(req *authv3.CheckRequest) string {
 		}
 	}
 	return ""
+}
+
+// extractTctxField extracts a single tctx field value from the ext_authz HTTP request
+// based on the mapping source (body, query, header, path).
+func extractTctxField(httpReq *authv3.AttributeContext_HttpRequest, mapping v1alpha1.TctxFieldMapping) (string, error) {
+	switch mapping.Source {
+	case "body":
+		body := httpReq.GetBody()
+		if body == "" {
+			return "", nil
+		}
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+			return "", fmt.Errorf("failed to parse request body as JSON: %w", err)
+		}
+		val, ok := parsed[mapping.Field]
+		if !ok {
+			return "", nil
+		}
+		switch v := val.(type) {
+		case string:
+			return v, nil
+		default:
+			b, _ := json.Marshal(v)
+			return string(b), nil
+		}
+	case "query":
+		rawPath := httpReq.GetPath()
+		if idx := strings.Index(rawPath, "?"); idx >= 0 {
+			query, err := url.ParseQuery(rawPath[idx+1:])
+			if err != nil {
+				return "", fmt.Errorf("failed to parse query string: %w", err)
+			}
+			return query.Get(mapping.Field), nil
+		}
+		return "", nil
+	case "header":
+		return getHeader(httpReq.GetHeaders(), strings.ToLower(mapping.Field)), nil
+	case "path":
+		// Not implemented yet — would need pattern matching against the rule's endpoint path
+		return "", nil
+	default:
+		return "", fmt.Errorf("unknown tctxMapping source: %q", mapping.Source)
+	}
 }
 
 // allowedWithHeaders creates an OK response that injects headers into the upstream request.
