@@ -8,6 +8,19 @@
 *.so
 *.dylib
 
+# Built binaries (go build ./cmd/... and examples)
+/controller
+/extauth
+/tts
+/analyzer
+/orchestrator
+/retriever
+/mock-idp
+/service-a
+/service-b
+/service-c
+/bin/
+
 # Test binary, built with `go test -c`
 *.test
 
