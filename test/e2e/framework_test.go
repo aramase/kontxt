@@ -1,4 +1,4 @@
-//go:build e2e || agents_e2e
+//go:build e2e || agents_e2e || agents_istio_e2e
 
 package e2e
 

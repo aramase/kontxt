@@ -55,3 +55,7 @@ controller:
 
 # Namespace to deploy into
 namespace: kontxt-system
+
+# Istio integration
+istio:
+  enabled: false

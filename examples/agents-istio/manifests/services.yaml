@@ -1,0 +1,248 @@
+# Demo agent service deployments
+---
+# mock-idp
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-idp
+  namespace: demo
+  labels:
+    app: mock-idp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mock-idp
+  template:
+    metadata:
+      labels:
+        app: mock-idp
+    spec:
+      containers:
+        - name: mock-idp
+          image: kontxt-mock-idp:latest
+          imagePullPolicy: Never
+          args:
+            - --addr=:8080
+            - --issuer=http://mock-idp.demo.svc.cluster.local:8080
+          ports:
+            - containerPort: 8080
+              name: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-idp
+  namespace: demo
+spec:
+  selector:
+    app: mock-idp
+  ports:
+    - port: 8080
+      targetPort: http
+      name: http
+---
+# orchestrator
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orchestrator
+  namespace: demo
+  labels:
+    app: orchestrator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: orchestrator
+  template:
+    metadata:
+      labels:
+        app: orchestrator
+    spec:
+      containers:
+        - name: orchestrator
+          image: kontxt-orchestrator:latest
+          imagePullPolicy: Never
+          args:
+            - --addr=:8081
+            - --retriever=http://retriever.demo.svc.cluster.local:8082
+            - --analyzer=http://analyzer.demo.svc.cluster.local:8083
+          ports:
+            - containerPort: 8081
+              name: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orchestrator
+  namespace: demo
+spec:
+  selector:
+    app: orchestrator
+  ports:
+    - port: 8081
+      targetPort: http
+      name: http
+---
+# retriever
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retriever
+  namespace: demo
+  labels:
+    app: retriever
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: retriever
+  template:
+    metadata:
+      labels:
+        app: retriever
+    spec:
+      containers:
+        - name: retriever
+          image: kontxt-retriever:latest
+          imagePullPolicy: Never
+          args:
+            - --addr=:8082
+            - --jwks=http://kontxt-tts.kontxt-system.svc.cluster.local/.well-known/jwks.json
+            - --trust-domain=demo.example.com
+          ports:
+            - containerPort: 8082
+              name: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: retriever
+  namespace: demo
+spec:
+  selector:
+    app: retriever
+  ports:
+    - port: 8082
+      targetPort: http
+      name: http
+---
+# analyzer
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analyzer
+  namespace: demo
+  labels:
+    app: analyzer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: analyzer
+  template:
+    metadata:
+      labels:
+        app: analyzer
+    spec:
+      containers:
+        - name: analyzer
+          image: kontxt-analyzer:latest
+          imagePullPolicy: Never
+          args:
+            - --addr=:8083
+            - --jwks=http://kontxt-tts.kontxt-system.svc.cluster.local/.well-known/jwks.json
+            - --trust-domain=demo.example.com
+          ports:
+            - containerPort: 8083
+              name: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analyzer
+  namespace: demo
+spec:
+  selector:
+    app: analyzer
+  ports:
+    - port: 8083
+      targetPort: http
+      name: http
