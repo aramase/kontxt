@@ -1,0 +1,140 @@
+# Gateway — AgentGateway proxy with HTTP listener (programmed by istiod)
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: demo-gateway
+  namespace: demo
+spec:
+  gatewayClassName: istio-agentgateway
+  listeners:
+    - protocol: HTTP
+      port: 80
+      name: http
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+# ReferenceGrant — allow HTTPRoutes in demo namespace to reference
+# kontxt-extauth services in kontxt-system namespace.
+apiVersion: gateway.networking.k8s.io/v1
+kind: ReferenceGrant
+metadata:
+  name: allow-extauth-from-demo
+  namespace: kontxt-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: demo
+  to:
+    - group: ""
+      kind: Service
+---
+# HTTPRoute — mock IdP (no ext auth)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: idp-route
+  namespace: demo
+spec:
+  parentRefs:
+    - name: demo-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /idp
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+      backendRefs:
+        - name: mock-idp
+          port: 8080
+---
+# HTTPRoute — orchestrator entry point with ExternalAuth generate filter
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: orchestrator-route
+  namespace: demo
+spec:
+  parentRefs:
+    - name: demo-gateway
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /api/research
+          method: POST
+      filters:
+        - type: ExternalAuth
+          externalAuth:
+            protocol: GRPC
+            grpc: {}
+            backendRef:
+              name: kontxt-extauth-generate
+              namespace: kontxt-system
+              port: 9000
+            forwardBody:
+              maxSize: 8192
+      backendRefs:
+        - name: orchestrator
+          port: 8081
+---
+# HTTPRoute — retriever with ExternalAuth verify filter
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: retriever-route
+  namespace: demo
+spec:
+  parentRefs:
+    - name: demo-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/retrieve
+      filters:
+        - type: ExternalAuth
+          externalAuth:
+            protocol: GRPC
+            grpc: {}
+            backendRef:
+              name: kontxt-extauth
+              namespace: kontxt-system
+              port: 9000
+      backendRefs:
+        - name: retriever
+          port: 8082
+---
+# HTTPRoute — analyzer with ExternalAuth verify filter
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: analyzer-route
+  namespace: demo
+spec:
+  parentRefs:
+    - name: demo-gateway
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /api/analyze
+          method: POST
+      filters:
+        - type: ExternalAuth
+          externalAuth:
+            protocol: GRPC
+            grpc: {}
+            backendRef:
+              name: kontxt-extauth
+              namespace: kontxt-system
+              port: 9000
+      backendRefs:
+        - name: analyzer
+          port: 8083

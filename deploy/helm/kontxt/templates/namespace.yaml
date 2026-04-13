@@ -5,3 +5,6 @@ metadata:
   labels:
     app.kubernetes.io/name: kontxt
     app.kubernetes.io/part-of: kontxt
+    {{- if .Values.istio.enabled }}
+    istio.io/dataplane-mode: ambient
+    {{- end }}

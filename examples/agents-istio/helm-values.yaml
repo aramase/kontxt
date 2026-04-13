@@ -1,0 +1,12 @@
+# Helm values override for the AI Research Assistant demo (Istio mode).
+# Used by setup.sh to configure the TTS with the mock IdP.
+tts:
+  config:
+    trustDomain: "demo.example.com"
+    subjectTokens:
+      - issuer:
+          url: "http://mock-idp.demo.svc.cluster.local:8080"
+          audiences: ["demo-app"]
+        claimMappings:
+          subject:
+            claim: "email"

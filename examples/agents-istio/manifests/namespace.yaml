@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+  labels:
+    kontxt.io/entry-allowed: "true"
+    istio.io/dataplane-mode: ambient

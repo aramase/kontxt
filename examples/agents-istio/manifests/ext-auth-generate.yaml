@@ -1,0 +1,71 @@
+# Second ext auth deployment in generate mode.
+# The default Helm-installed extauth runs in verify mode.
+# This deployment runs in generate mode for the entry-point route.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kontxt-extauth-generate
+  namespace: kontxt-system
+  labels:
+    app.kubernetes.io/name: kontxt-extauth-generate
+    app.kubernetes.io/part-of: kontxt
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kontxt-extauth-generate
+  namespace: kontxt-system
+  labels:
+    app.kubernetes.io/name: kontxt-extauth-generate
+    app.kubernetes.io/part-of: kontxt
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kontxt-extauth-generate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kontxt-extauth-generate
+        app.kubernetes.io/part-of: kontxt
+    spec:
+      serviceAccountName: kontxt-extauth-generate
+      containers:
+        - name: extauth
+          image: kontxt-extauth:latest
+          imagePullPolicy: Never
+          args:
+            - --addr=:9000
+            - --tts=http://kontxt-tts.kontxt-system.svc.cluster.local
+            - --jwks=http://kontxt-tts.kontxt-system.svc.cluster.local/.well-known/jwks.json
+            - --trust-domain=demo.example.com
+            - --mode=generate
+            - --controller-addr=kontxt-controller.kontxt-system.svc.cluster.local:9090
+          ports:
+            - containerPort: 9000
+              name: grpc
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kontxt-extauth-generate
+  namespace: kontxt-system
+  labels:
+    app.kubernetes.io/name: kontxt-extauth-generate
+    app.kubernetes.io/part-of: kontxt
+spec:
+  selector:
+    app.kubernetes.io/name: kontxt-extauth-generate
+  ports:
+    - port: 9000
+      targetPort: grpc
+      protocol: TCP
+      name: grpc
