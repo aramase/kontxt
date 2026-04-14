@@ -1,4 +1,4 @@
-.PHONY: all build test test-e2e test-agents-e2e lint clean docker helm generate generate-proto manifests verify-codegen
+.PHONY: all build test test-e2e test-agents-e2e test-agents-istio-e2e lint clean docker helm generate generate-proto manifests verify-codegen
 
 CONTROLLER_GEN ?= $(shell which controller-gen)
 
@@ -41,6 +41,13 @@ test-agents-e2e:
 
 test-agents-e2e-keep:
 	KONTXT_AGENTS_E2E=1 KONTXT_E2E_KEEP_CLUSTER=1 go test -tags agents_e2e ./test/e2e/ -v -count=1 -timeout 15m
+
+# Agents Istio E2E tests (requires Docker/Podman + kind + helm + istioctl)
+test-agents-istio-e2e:
+	KONTXT_ISTIO_E2E=1 go test -tags agents_istio_e2e ./test/e2e/ -v -count=1 -timeout 20m
+
+test-agents-istio-e2e-keep:
+	KONTXT_ISTIO_E2E=1 KONTXT_E2E_KEEP_CLUSTER=1 go test -tags agents_istio_e2e ./test/e2e/ -v -count=1 -timeout 20m
 
 # Lint
 lint:
