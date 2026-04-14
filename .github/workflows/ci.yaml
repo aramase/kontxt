@@ -128,3 +128,33 @@ jobs:
 
       - name: Run Agents E2E tests
         run: make test-agents-e2e
+
+  agents-istio-e2e:
+    name: Agents Istio E2E Tests
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Install kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Install istioctl
+        run: |
+          curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.26.0 sh -
+          sudo mv istio-1.26.0/bin/istioctl /usr/local/bin/istioctl
+          istioctl version --remote=false
+
+      - name: Run Agents Istio E2E tests
+        run: make test-agents-istio-e2e
