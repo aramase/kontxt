@@ -1,0 +1,7 @@
+# Kind cluster config for Istio E2E tests.
+# Uses an extra worker node to ensure sufficient CPU for Istio + kontxt + demo pods.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  - role: worker
