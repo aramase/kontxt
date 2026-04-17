@@ -158,7 +158,7 @@ func deployAgentsStack() error {
 		"--set", "extauth.image.pullPolicy=Never",
 		"--set", "controller.image.repository="+prefix+"kontxt-controller",
 		"--set", "controller.image.pullPolicy=Never",
-		"--wait", "--timeout", "120s"); err != nil {
+		"--wait", "--timeout", "300s", "--debug"); err != nil {
 		return fmt.Errorf("installing kontxt: %w", err)
 	}
 

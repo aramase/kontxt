@@ -63,7 +63,8 @@ func setupIstioCluster() error {
 	}
 
 	fmt.Println("Creating kind cluster...")
-	if err := runIstioCmdNoOutput("kind", "create", "cluster", "--name", istioClusterName, "--wait", "60s"); err != nil {
+	kindConfig := filepath.Join(istioRepoRoot, "examples/agents-istio/kind-config.yaml")
+	if err := runIstioCmdNoOutput("kind", "create", "cluster", "--name", istioClusterName, "--config", kindConfig, "--wait", "120s"); err != nil {
 		return fmt.Errorf("creating kind cluster: %w", err)
 	}
 
@@ -169,7 +170,21 @@ func deployIstioStack() error {
 		"--set", "controller.image.repository="+prefix+"kontxt-controller",
 		"--set", "controller.image.pullPolicy=Never",
 		"--set", "istio.enabled=true",
-		"--wait", "--timeout", "120s"); err != nil {
+		"--wait", "--timeout", "300s", "--debug"); err != nil {
+		// Dump diagnostic info for debugging.
+		fmt.Println("=== kontxt helm install failed, dumping diagnostics ===")
+		fmt.Println("--- Pods in", namespace, "---")
+		runIstioCmdNoOutput("kubectl", "--context", istioKubeContext, "-n", namespace, "get", "pods", "-o", "wide")
+		fmt.Println("--- Describe pods in", namespace, "---")
+		runIstioCmdNoOutput("kubectl", "--context", istioKubeContext, "-n", namespace, "describe", "pods")
+		fmt.Println("--- Events in", namespace, "---")
+		runIstioCmdNoOutput("kubectl", "--context", istioKubeContext, "-n", namespace, "get", "events", "--sort-by=.lastTimestamp")
+		fmt.Println("--- Pod logs in", namespace, "---")
+		for _, d := range []string{"kontxt-controller", "kontxt-extauth", "kontxt-tts"} {
+			fmt.Printf("--- Logs for %s ---\n", d)
+			runIstioCmdNoOutput("kubectl", "--context", istioKubeContext, "-n", namespace, "logs", "-l", "app.kubernetes.io/name="+d, "--all-containers", "--tail=50")
+		}
+		fmt.Println("=== end diagnostics ===")
 		return fmt.Errorf("installing kontxt: %w", err)
 	}
 
@@ -181,7 +196,15 @@ func deployIstioStack() error {
 
 	// Wait for the controller to reconcile CRDs before deploying ext-auth-generate.
 	fmt.Println("Waiting for controller to reconcile CRDs...")
-	time.Sleep(5 * time.Second)
+	for _, res := range []struct{ kind, name string }{
+		{"transactiontype", "earnings-research"},
+		{"servicetokenrequirement", "retriever"},
+		{"servicetokenrequirement", "analyzer"},
+	} {
+		if err := waitForIstioCondition(istioDemoNS, res.kind, res.name, "Ready", 60*time.Second); err != nil {
+			return fmt.Errorf("waiting for %s/%s to be Ready: %w", res.kind, res.name, err)
+		}
+	}
 
 	fmt.Println("Deploying ext auth generate adapter...")
 	if err := runIstioCmdNoOutput("kubectl", "--context", istioKubeContext, "apply",
@@ -219,7 +242,30 @@ func deployIstioStack() error {
 
 	// Wait for gateway pod.
 	if err := waitForIstioPod(istioDemoNS, "gateway.networking.k8s.io/gateway-name=demo-gateway", 120*time.Second); err != nil {
+		fmt.Println("=== gateway pod wait failed, dumping diagnostics ===")
+		fmt.Println("--- Gateway status ---")
+		runIstioCmdNoOutput("kubectl", "--context", istioKubeContext, "-n", istioDemoNS, "get", "gateway", "demo-gateway", "-o", "yaml")
+		fmt.Println("--- GatewayClass ---")
+		runIstioCmdNoOutput("kubectl", "--context", istioKubeContext, "get", "gatewayclass", "-o", "wide")
+		fmt.Println("--- Pods in", istioDemoNS, "---")
+		runIstioCmdNoOutput("kubectl", "--context", istioKubeContext, "-n", istioDemoNS, "get", "pods", "-o", "wide")
+		fmt.Println("--- Events in", istioDemoNS, "---")
+		runIstioCmdNoOutput("kubectl", "--context", istioKubeContext, "-n", istioDemoNS, "get", "events", "--sort-by=.lastTimestamp")
+		fmt.Println("--- istiod logs (last 50) ---")
+		runIstioCmdNoOutput("kubectl", "--context", istioKubeContext, "-n", istioSystemNS, "logs", "-l", "app=istiod", "--tail=50")
+		fmt.Println("=== end gateway diagnostics ===")
 		return fmt.Errorf("waiting for gateway pod: %w", err)
+	}
+
+	// Wait for the gateway listener to be programmed by istiod.
+	fmt.Println("Waiting for gateway listener to be programmed...")
+	if err := waitForGatewayListenerProgrammed(istioDemoNS, "demo-gateway", 120*time.Second); err != nil {
+		fmt.Println("=== gateway listener not programmed, dumping diagnostics ===")
+		runIstioCmdNoOutput("kubectl", "--context", istioKubeContext, "-n", istioDemoNS, "get", "gateway", "demo-gateway", "-o", "yaml")
+		fmt.Println("--- istiod logs (last 50) ---")
+		runIstioCmdNoOutput("kubectl", "--context", istioKubeContext, "-n", istioSystemNS, "logs", "-l", "app=istiod", "--tail=50")
+		fmt.Println("=== end diagnostics ===")
+		return fmt.Errorf("waiting for gateway listener to be programmed: %w", err)
 	}
 
 	fmt.Println("Istio agent E2E setup complete")
@@ -236,10 +282,17 @@ func installIstioForTest() error {
 
 	// Try using istioctl if available.
 	if _, err := exec.LookPath("istioctl"); err == nil {
-		return runIstioCmdNoOutput("istioctl", "install", "--context", istioKubeContext, "-y",
+		args := []string{"install", "--context", istioKubeContext, "-y",
 			"--set", "profile=ambient",
 			"--set", "values.pilot.env.PILOT_ENABLE_AGENTGATEWAY=true",
-			"--set", "meshConfig.accessLogFile=/dev/stdout")
+			"--set", "meshConfig.accessLogFile=/dev/stdout",
+		}
+		// Allow overriding the image hub (e.g. for alpha/pre-release builds).
+		hub := os.Getenv("ISTIO_HUB")
+		if hub != "" {
+			args = append(args, "--set", "hub="+hub)
+		}
+		return runIstioCmdNoOutput("istioctl", args...)
 	}
 
 	return fmt.Errorf("istioctl not found. Set ISTIO_PATH to an istio source checkout or install istioctl 1.30+")
@@ -319,6 +372,36 @@ func waitForIstioPod(ns, labelSelector string, timeout time.Duration) error {
 		time.Sleep(2 * time.Second)
 	}
 	return fmt.Errorf("timed out waiting for pod with label %s", labelSelector)
+}
+
+func waitForIstioCondition(ns, kind, name, conditionType string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		out, err := runIstioCmd("kubectl", "--context", istioKubeContext,
+			"-n", ns, "get", kind, name,
+			"-o", fmt.Sprintf("jsonpath={.status.conditions[?(@.type=='%s')].status}", conditionType))
+		if err == nil && strings.TrimSpace(out) == "True" {
+			fmt.Printf("%s/%s is %s\n", kind, name, conditionType)
+			return nil
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return fmt.Errorf("timed out waiting for %s/%s condition %s", kind, name, conditionType)
+}
+
+func waitForGatewayListenerProgrammed(ns, name string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		out, err := runIstioCmd("kubectl", "--context", istioKubeContext,
+			"-n", ns, "get", "gateway", name,
+			"-o", "jsonpath={.status.listeners[0].conditions[?(@.type=='Programmed')].status}")
+		if err == nil && strings.TrimSpace(out) == "True" {
+			fmt.Printf("Gateway %s listener is Programmed\n", name)
+			return nil
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return fmt.Errorf("timed out waiting for gateway %s listener to be Programmed", name)
 }
 
 // istioPortForward starts a port-forward to a service and returns the local URL + cancel func.
@@ -435,14 +518,14 @@ func TestIstioE2E_GatewayReady(t *testing.T) {
 
 	out, err = runIstioCmd("kubectl", "--context", istioKubeContext,
 		"get", "gateway", "demo-gateway", "-n", istioDemoNS,
-		"-o", "jsonpath={.status.conditions[?(@.type=='Programmed')].status}")
+		"-o", "jsonpath={.status.listeners[0].conditions[?(@.type=='Programmed')].status}")
 	if err != nil {
 		t.Fatalf("failed to get gateway programmed status: %v", err)
 	}
 	if strings.TrimSpace(out) != "True" {
-		t.Fatalf("Gateway not Programmed, got: %s", out)
+		t.Fatalf("Gateway listener not Programmed, got: %s", out)
 	}
-	t.Log("Gateway demo-gateway is Programmed by istiod")
+	t.Log("Gateway demo-gateway listener is Programmed by istiod")
 }
 
 func TestIstioE2E_RulesStreamed(t *testing.T) {
