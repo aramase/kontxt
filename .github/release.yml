@@ -1,0 +1,30 @@
+changelog:
+  exclude:
+    labels:
+      - release-note-none
+  categories:
+    - title: "⚠️ Breaking Changes"
+      labels:
+        - breaking-change
+    - title: "🌈 Features"
+      labels:
+        - feature
+    - title: "🐞 Bug Fixes"
+      labels:
+        - bug
+    - title: "API Changes"
+      labels:
+        - api-change
+    - title: "📘 Documentation"
+      labels:
+        - documentation
+    - title: "Deprecation"
+      labels:
+        - deprecation
+    - title: "🔧 Maintenance"
+      labels:
+        - chore
+        - dependencies
+    - title: "Other Changes"
+      labels:
+        - "*"
