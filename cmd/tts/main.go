@@ -5,14 +5,22 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
+	"github.com/aramase/kontxt/internal/version"
 	"github.com/aramase/kontxt/pkg/tts"
 )
 
 func main() {
+	showVersion := flag.Bool("version", false, "print version information and exit")
 	configPath := flag.String("config", "config.yaml", "path to TTS configuration file")
 	addr := flag.String("addr", ":8080", "address to listen on")
 	flag.Parse()
+
+	if *showVersion {
+		version.Print()
+		os.Exit(0)
+	}
 
 	cfg, err := tts.LoadConfig(*configPath)
 	if err != nil {

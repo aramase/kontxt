@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/aramase/kontxt/internal/version"
 	"github.com/aramase/kontxt/pkg/extauth"
 	"github.com/aramase/kontxt/pkg/extauth/ruleclient"
 	sdktts "github.com/aramase/kontxt/sdk/tts"
@@ -20,6 +21,7 @@ import (
 )
 
 func main() {
+	showVersion := flag.Bool("version", false, "print version information and exit")
 	addr := flag.String("addr", ":9000", "gRPC listen address")
 	ttsEndpoint := flag.String("tts", "http://localhost:8080", "TTS endpoint")
 	jwksURL := flag.String("jwks", "http://localhost:8080/.well-known/jwks.json", "TTS JWKS URL")
@@ -27,6 +29,11 @@ func main() {
 	mode := flag.String("mode", "verify", "mode: verify or generate")
 	controllerAddr := flag.String("controller-addr", "kontxt-controller.kontxt-system.svc.cluster.local:9090", "controller gRPC address for rule streaming")
 	flag.Parse()
+
+	if *showVersion {
+		version.Print()
+		os.Exit(0)
+	}
 
 	lis, err := net.Listen("tcp", *addr)
 	if err != nil {
