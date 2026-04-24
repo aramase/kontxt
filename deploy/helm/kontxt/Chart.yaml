@@ -3,7 +3,7 @@ name: kontxt
 description: Transaction Tokens (TxTokens) for Kubernetes — seal identity, context, and authorization across multi-hop agent workflows.
 type: application
 version: 0.0.1
-appVersion: "0.0.1"
+appVersion: "v0.0.1"
 keywords:
   - transaction-tokens
   - agent-identity
