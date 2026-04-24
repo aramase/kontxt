@@ -153,10 +153,13 @@ func deployAgentsStack() error {
 		"-f", filepath.Join(agentsDir, "helm-values.yaml"),
 		"--set", "tts.config.issuer=https://kontxt-tts.kontxt-system.svc.cluster.local",
 		"--set", "tts.image.repository="+prefix+"kontxt-tts",
+		"--set", "tts.image.tag=latest",
 		"--set", "tts.image.pullPolicy=Never",
 		"--set", "extauth.image.repository="+prefix+"kontxt-extauth",
+		"--set", "extauth.image.tag=latest",
 		"--set", "extauth.image.pullPolicy=Never",
 		"--set", "controller.image.repository="+prefix+"kontxt-controller",
+		"--set", "controller.image.tag=latest",
 		"--set", "controller.image.pullPolicy=Never",
 		"--wait", "--timeout", "300s", "--debug"); err != nil {
 		return fmt.Errorf("installing kontxt: %w", err)

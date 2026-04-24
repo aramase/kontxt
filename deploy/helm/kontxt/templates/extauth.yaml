@@ -29,7 +29,7 @@ spec:
       serviceAccountName: kontxt-extauth
       containers:
         - name: extauth
-          image: "{{ .Values.extauth.image.repository }}:{{ .Values.extauth.image.tag }}"
+          image: "{{ .Values.extauth.image.repository }}:{{ .Values.extauth.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.extauth.image.pullPolicy }}
           args:
             - --addr=:{{ .Values.extauth.port }}

@@ -1,4 +1,4 @@
-.PHONY: all build test test-e2e test-agents-e2e test-agents-istio-e2e lint clean docker helm generate generate-proto manifests verify-codegen
+.PHONY: all build test test-e2e test-agents-e2e test-agents-istio-e2e lint clean docker helm generate generate-proto manifests verify-codegen helm-package helm-push
 
 CONTROLLER_GEN ?= $(shell which controller-gen)
 
@@ -84,13 +84,13 @@ verify-codegen: generate manifests ## Verify generated files are up-to-date
 
 # Docker
 docker-tts:
-	docker build -t ghcr.io/aramase/kontxt-tts:latest -f cmd/tts/Dockerfile .
+	docker build -t ghcr.io/aramase/kontxt/tts:latest -f cmd/tts/Dockerfile .
 
 docker-extauth:
-	docker build -t ghcr.io/aramase/kontxt-extauth:latest -f cmd/extauth/Dockerfile .
+	docker build -t ghcr.io/aramase/kontxt/extauth:latest -f cmd/extauth/Dockerfile .
 
 docker-controller:
-	docker build -t ghcr.io/aramase/kontxt-controller:latest -f cmd/controller/Dockerfile .
+	docker build -t ghcr.io/aramase/kontxt/controller:latest -f cmd/controller/Dockerfile .
 
 docker: docker-tts docker-extauth docker-controller
 
@@ -101,6 +101,12 @@ helm-lint:
 helm-template:
 	helm template kontxt deploy/helm/kontxt
 
+helm-package:
+	helm package deploy/helm/kontxt --version $(VERSION) --app-version $(VERSION) -d .cr-release-packages/
+
+helm-push:
+	helm push .cr-release-packages/kontxt-$(VERSION).tgz oci://ghcr.io/aramase/charts
+
 # Clean
 clean:
-	rm -rf bin/ coverage.out coverage.html
+	rm -rf bin/ coverage.out coverage.html .cr-release-packages/

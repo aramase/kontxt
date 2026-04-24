@@ -3,8 +3,8 @@
 # TTS configuration
 tts:
   image:
-    repository: ghcr.io/aramase/kontxt-tts
-    tag: latest
+    repository: ghcr.io/aramase/kontxt/tts
+    tag: ""
     pullPolicy: IfNotPresent
   replicas: 1
   port: 8080
@@ -25,8 +25,8 @@ tts:
 # Ext auth adapter configuration
 extauth:
   image:
-    repository: ghcr.io/aramase/kontxt-extauth
-    tag: latest
+    repository: ghcr.io/aramase/kontxt/extauth
+    tag: ""
     pullPolicy: IfNotPresent
   replicas: 1
   port: 9000
@@ -41,8 +41,8 @@ extauth:
 # Controller configuration
 controller:
   image:
-    repository: ghcr.io/aramase/kontxt-controller
-    tag: latest
+    repository: ghcr.io/aramase/kontxt/controller
+    tag: ""
     pullPolicy: IfNotPresent
   replicas: 1
   resources:

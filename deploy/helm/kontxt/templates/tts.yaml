@@ -29,7 +29,7 @@ spec:
       serviceAccountName: kontxt-tts
       containers:
         - name: tts
-          image: "{{ .Values.tts.image.repository }}:{{ .Values.tts.image.tag }}"
+          image: "{{ .Values.tts.image.repository }}:{{ .Values.tts.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.tts.image.pullPolicy }}
           args:
             - --config=/etc/kontxt/config.yaml
