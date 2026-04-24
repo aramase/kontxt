@@ -2,6 +2,13 @@
 
 CONTROLLER_GEN ?= $(shell which controller-gen)
 
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+GIT_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS := -X github.com/aramase/kontxt/internal/version.Version=$(VERSION) \
+           -X github.com/aramase/kontxt/internal/version.GitCommit=$(GIT_COMMIT) \
+           -X github.com/aramase/kontxt/internal/version.BuildDate=$(BUILD_DATE)
+
 all: generate manifests test build
 
 # Build
@@ -9,13 +16,13 @@ build:
 	go build ./...
 
 build-tts:
-	CGO_ENABLED=0 go build -o bin/tts ./cmd/tts/
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/tts ./cmd/tts/
 
 build-extauth:
-	CGO_ENABLED=0 go build -o bin/extauth ./cmd/extauth/
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/extauth ./cmd/extauth/
 
 build-controller:
-	CGO_ENABLED=0 go build -o bin/controller ./cmd/controller/
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/controller ./cmd/controller/
 
 # Test
 test:

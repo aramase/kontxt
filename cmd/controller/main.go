@@ -18,6 +18,7 @@ import (
 	rulesv1 "github.com/aramase/kontxt/gen/kontxt/rules/v1"
 	"github.com/aramase/kontxt/internal/controller"
 	"github.com/aramase/kontxt/internal/controller/ruleserver"
+	"github.com/aramase/kontxt/internal/version"
 )
 
 var scheme = runtime.NewScheme()
@@ -28,10 +29,16 @@ func init() {
 }
 
 func main() {
+	showVersion := flag.Bool("version", false, "print version information and exit")
 	metricsAddr := flag.String("metrics-bind-address", ":8090", "metrics endpoint address")
 	healthAddr := flag.String("health-probe-bind-address", ":8091", "health probe address")
 	grpcAddr := flag.String("grpc-addr", ":9090", "gRPC address for rule distribution")
 	flag.Parse()
+
+	if *showVersion {
+		version.Print()
+		os.Exit(0)
+	}
 
 	opts := zap.Options{Development: true}
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
