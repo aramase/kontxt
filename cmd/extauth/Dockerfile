@@ -11,6 +11,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -o extauth ./cmd/extauth/
 
 FROM gcr.io/distroless/static:nonroot
+LABEL org.opencontainers.image.source=https://github.com/aramase/kontxt
 COPY --from=builder /workspace/extauth /extauth
 USER 65532:65532
 ENTRYPOINT ["/extauth"]
