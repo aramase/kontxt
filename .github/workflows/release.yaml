@@ -78,12 +78,15 @@ jobs:
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
       - name: Package Helm chart
-        run: helm package deploy/helm/kontxt --version ${{ steps.meta.outputs.version }} --app-version ${{ steps.meta.outputs.tag }} -d .cr-release-packages/
+        run: |
+          mkdir -p .cr-release-packages
+          helm package deploy/helm/kontxt --version ${{ steps.meta.outputs.version }} --app-version ${{ steps.meta.outputs.tag }} -d .cr-release-packages/
 
       - name: Push Helm chart to OCI
         run: helm push .cr-release-packages/kontxt-${{ steps.meta.outputs.version }}.tgz oci://${{ env.REGISTRY }}/aramase/charts
