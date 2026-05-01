@@ -11,7 +11,6 @@ For a complete working demo with sample agent services, see [examples/agents/](.
 - A Kubernetes cluster (AKS, GKE, EKS, or any conformant cluster)
 - `kubectl` configured to access the cluster
 - `helm` v3.x
-- A container registry accessible from the cluster (for kontxt images)
 
 ## 1. Install Gateway API CRDs
 
@@ -52,7 +51,7 @@ kubectl get pods -n agentgateway-system
 Install kontxt platform components (TTS, ext auth adapter, controller). Helm automatically installs the CRDs from the chart's `crds/` directory:
 
 ```bash
-helm upgrade -i kontxt deploy/helm/kontxt \
+helm upgrade -i kontxt oci://ghcr.io/aramase/charts/kontxt --version 0.0.1 \
   --create-namespace --namespace kontxt-system \
   --set tts.config.trustDomain=my-cluster.example.com \
   --set tts.config.issuer=https://kontxt-tts.kontxt-system.svc.cluster.local \
@@ -356,7 +355,7 @@ kubectl delete -f txtoken-config.yaml
 
 # Uninstall kontxt (note: Helm does not delete CRDs on uninstall)
 helm uninstall kontxt -n kontxt-system
-kubectl delete -f deploy/helm/kontxt/crds/
+kubectl delete crd txtokenconfigs.kontxt.io transactiontypes.kontxt.io servicetokenrequirements.kontxt.io tokenpolicies.kontxt.io
 
 # Uninstall AgentGateway
 kubectl delete gateway agentgateway-proxy -n agentgateway-system

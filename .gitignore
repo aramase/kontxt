@@ -43,3 +43,7 @@ go.work.sum
 # Editor/IDE
 # .idea/
 .vscode/
+
+# Helm packaging artifacts
+*.tgz
+.cr-release-packages/

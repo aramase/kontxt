@@ -171,7 +171,8 @@ httpClient := &http.Client{
 ### Kubernetes (Helm)
 
 ```bash
-helm install kontxt deploy/helm/kontxt \
+helm install kontxt oci://ghcr.io/aramase/charts/kontxt --version 0.0.1 \
+  --create-namespace --namespace kontxt-system \
   --set tts.config.trustDomain=cluster.example.com \
   --set tts.config.issuer=https://kontxt-tts.kontxt-system.svc
 ```
