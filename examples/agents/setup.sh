@@ -100,10 +100,13 @@ helm upgrade -i kontxt "${REPO_ROOT}/deploy/helm/kontxt" \
   -f "${SCRIPT_DIR}/helm-values.yaml" \
   --set "tts.config.issuer=https://kontxt-tts.${KONTXT_NS}.svc.cluster.local" \
   --set "tts.image.repository=${IMAGE_PREFIX}kontxt-tts" \
+  --set "tts.image.tag=latest" \
   --set "tts.image.pullPolicy=Never" \
   --set "extauth.image.repository=${IMAGE_PREFIX}kontxt-extauth" \
+  --set "extauth.image.tag=latest" \
   --set "extauth.image.pullPolicy=Never" \
   --set "controller.image.repository=${IMAGE_PREFIX}kontxt-controller" \
+  --set "controller.image.tag=latest" \
   --set "controller.image.pullPolicy=Never" \
   --wait
 
@@ -117,14 +120,7 @@ kubectl --context "${KUBE_CONTEXT}" wait --for=condition=available deployment/ko
 sleep 3
 echo "    controller ready"
 
-# ---- 9. Deploy ext auth generate adapter ----
-echo "==> Deploying ext auth generate adapter..."
-kubectl --context "${KUBE_CONTEXT}" apply -f "${SCRIPT_DIR}/manifests/ext-auth-generate.yaml"
-if [ -n "${IMAGE_PREFIX}" ]; then
-  kubectl --context "${KUBE_CONTEXT}" -n "${KONTXT_NS}" set image deployment/kontxt-extauth-generate extauth="${IMAGE_PREFIX}kontxt-extauth:latest"
-fi
-
-# ---- 10. Apply gateway and routing ----
+# ---- 9. Apply gateway and routing ----
 echo "==> Applying gateway, routes, and ext_authz policies..."
 kubectl --context "${KUBE_CONTEXT}" apply -f "${SCRIPT_DIR}/manifests/gateway.yaml"
 
