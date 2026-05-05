@@ -77,10 +77,17 @@ kubectl --context "${KUBE_CONTEXT}" apply --server-side --force-conflicts \
   -f "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_API_VERSION}/experimental-install.yaml"
 
 # ---- 4. Install Istio with AGENTGATEWAY feature flag ----
+# AgentGateway support requires Istio 1.30+ (currently alpha). The default
+# istioctl hub for alpha builds points to registry.istio.io/testing which
+# doesn't publish images publicly, so we default to docker.io/istio which
+# mirrors the release images.
+ISTIO_HUB="${ISTIO_HUB:-docker.io/istio}"
+
 install_istio_from_release() {
-  echo "==> Installing Istio (ambient profile)..."
+  echo "==> Installing Istio (ambient profile) from hub=${ISTIO_HUB}..."
   istioctl install --context "${KUBE_CONTEXT}" -y \
     --set profile=ambient \
+    --set hub="${ISTIO_HUB}" \
     --set values.pilot.env.PILOT_ENABLE_AGENTGATEWAY=true \
     --set meshConfig.accessLogFile=/dev/stdout
 }
