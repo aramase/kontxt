@@ -197,7 +197,7 @@ func deployIstioStack() error {
 		return fmt.Errorf("applying CRD instances: %w", err)
 	}
 
-	// Wait for the controller to reconcile CRDs before deploying ext-auth-generate.
+	// Wait for the controller to reconcile CRDs.
 	fmt.Println("Waiting for controller to reconcile CRDs...")
 	for _, res := range []struct{ kind, name string }{
 		{"transactiontype", "earnings-research"},
@@ -206,18 +206,6 @@ func deployIstioStack() error {
 	} {
 		if err := waitForIstioCondition(istioDemoNS, res.kind, res.name, "Ready", 60*time.Second); err != nil {
 			return fmt.Errorf("waiting for %s/%s to be Ready: %w", res.kind, res.name, err)
-		}
-	}
-
-	fmt.Println("Deploying ext auth generate adapter...")
-	if err := runIstioCmdNoOutput("kubectl", "--context", istioKubeContext, "apply",
-		"-f", filepath.Join(istioDir, "manifests/ext-auth-generate.yaml")); err != nil {
-		return fmt.Errorf("deploying ext-auth-generate: %w", err)
-	}
-	if prefix != "" {
-		if err := runIstioCmdNoOutput("kubectl", "--context", istioKubeContext, "-n", namespace,
-			"set", "image", "deployment/kontxt-extauth-generate", "extauth="+prefix+"kontxt-extauth:latest"); err != nil {
-			return fmt.Errorf("patching ext-auth-generate image: %w", err)
 		}
 	}
 

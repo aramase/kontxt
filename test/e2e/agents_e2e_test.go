@@ -171,21 +171,9 @@ func deployAgentsStack() error {
 		return fmt.Errorf("applying CRD instances: %w", err)
 	}
 
-	// Wait for the controller to reconcile CRDs before deploying ext-auth-generate.
+	// Wait for the controller to reconcile CRDs.
 	fmt.Println("Waiting for controller to reconcile CRDs...")
 	time.Sleep(5 * time.Second)
-
-	fmt.Println("Deploying ext auth generate adapter...")
-	if err := runCmdNoTest("kubectl", "--context", agentsKubeContext, "apply",
-		"-f", filepath.Join(agentsDir, "manifests/ext-auth-generate.yaml")); err != nil {
-		return fmt.Errorf("deploying ext-auth-generate: %w", err)
-	}
-	if prefix != "" {
-		if err := runCmdNoTest("kubectl", "--context", agentsKubeContext, "-n", namespace,
-			"set", "image", "deployment/kontxt-extauth-generate", "extauth="+prefix+"kontxt-extauth:latest"); err != nil {
-			return fmt.Errorf("patching ext-auth-generate image: %w", err)
-		}
-	}
 
 	fmt.Println("Applying gateway and routing...")
 	if err := runCmdNoTest("kubectl", "--context", agentsKubeContext, "apply",
