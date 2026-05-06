@@ -205,7 +205,7 @@ fi
 echo "==> Installing kontxt CRDs and platform..."
 helm upgrade -i kontxt "${REPO_ROOT}/deploy/helm/kontxt" \
   --kube-context "${KUBE_CONTEXT}" \
-  --create-namespace --namespace "${KONTXT_NS}" \
+  --namespace "${KONTXT_NS}" \
   -f "${SCRIPT_DIR}/helm-values.yaml" \
   --set "tts.config.issuer=https://kontxt-tts.${KONTXT_NS}.svc.cluster.local" \
   --set "tts.image.repository=${IMAGE_PREFIX}kontxt-tts" \

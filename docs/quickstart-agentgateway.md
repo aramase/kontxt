@@ -52,7 +52,7 @@ Install kontxt platform components (TTS, ext auth adapter, controller). Helm aut
 
 ```bash
 helm upgrade -i kontxt oci://ghcr.io/aramase/charts/kontxt --version 0.0.1 \
-  --create-namespace --namespace kontxt-system \
+  --namespace kontxt-system \
   --set tts.config.trustDomain=my-cluster.example.com \
   --set tts.config.issuer=https://kontxt-tts.kontxt-system.svc.cluster.local \
   --wait
