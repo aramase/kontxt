@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -23,6 +25,7 @@ import (
 func main() {
 	showVersion := flag.Bool("version", false, "print version information and exit")
 	addr := flag.String("addr", ":9000", "gRPC listen address")
+	healthAddr := flag.String("health-addr", ":9090", "HTTP health endpoint listen address")
 	ttsEndpoint := flag.String("tts", "http://localhost:8080", "TTS endpoint")
 	jwksURL := flag.String("jwks", "http://localhost:8080/.well-known/jwks.json", "TTS JWKS URL")
 	trustDomain := flag.String("trust-domain", "trust-domain.example.com", "trust domain for TxToken verification")
@@ -75,8 +78,38 @@ func main() {
 		}
 	}()
 
+	// Health endpoints:
+	//   /healthz — always 200 once the process is up (liveness)
+	//   /readyz  — 200 only after the rule client has received the initial
+	//             snapshot from the controller (readiness)
+	healthMux := http.NewServeMux()
+	healthMux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	healthMux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		if !rc.Ready() {
+			http.Error(w, "rules not yet synced", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	healthSrv := &http.Server{
+		Addr:              *healthAddr,
+		Handler:           healthMux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		fmt.Printf("Health endpoints listening on %s\n", *healthAddr)
+		if err := healthSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("Health server error: %v", err)
+		}
+	}()
+
 	go func() {
 		<-ctx.Done()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		_ = healthSrv.Shutdown(shutdownCtx)
 		gs.GracefulStop()
 	}()
 

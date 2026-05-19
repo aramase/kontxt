@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -38,6 +39,13 @@ type RuleClient struct {
 	opts   []grpc.DialOption
 	genSet GenerationSetter
 	verSet VerificationSetter
+
+	// genSynced is set to 1 after the first generation snapshot has been
+	// received and applied. Only meaningful when genSet != nil.
+	genSynced atomic.Bool
+	// verSynced is set to 1 after the first verification snapshot has been
+	// received and applied. Only meaningful when verSet != nil.
+	verSynced atomic.Bool
 }
 
 // NewRuleClient creates a RuleClient targeting the given controller gRPC address.
@@ -56,6 +64,19 @@ func (c *RuleClient) SetGenerationSetter(s GenerationSetter) {
 // SetVerificationSetter sets the target that receives verification rules.
 func (c *RuleClient) SetVerificationSetter(s VerificationSetter) {
 	c.verSet = s
+}
+
+// Ready reports whether the client has received and applied the initial
+// snapshot for every configured stream (generation and/or verification).
+// Returns false until each enabled stream has synced at least once.
+func (c *RuleClient) Ready() bool {
+	if c.genSet != nil && !c.genSynced.Load() {
+		return false
+	}
+	if c.verSet != nil && !c.verSynced.Load() {
+		return false
+	}
+	return true
 }
 
 // Run connects to the controller and streams rules. It reconnects on error
@@ -153,6 +174,7 @@ func (c *RuleClient) streamGeneration(ctx context.Context, client rulesv1.RuleDi
 			rules = append(rules, r)
 		}
 		c.genSet.SetGenerationRules(rules)
+		c.genSynced.Store(true)
 	}
 }
 
@@ -196,6 +218,7 @@ func (c *RuleClient) streamVerification(ctx context.Context, client rulesv1.Rule
 			rules = append(rules, r)
 		}
 		c.verSet.SetVerificationRules(rules)
+		c.verSynced.Store(true)
 	}
 }
 

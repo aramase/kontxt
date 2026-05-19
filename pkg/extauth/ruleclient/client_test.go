@@ -399,3 +399,65 @@ func TestConcurrentUpdates(t *testing.T) {
 		}
 	}
 }
+
+func TestReady_NoSettersConfigured(t *testing.T) {
+	// A client with no setters configured is trivially Ready — there is
+	// nothing to wait for.
+	client := NewRuleClient("ignored")
+	require.True(t, client.Ready())
+}
+
+func TestReady_NotReadyUntilSnapshotApplied(t *testing.T) {
+	rs, addr, cleanup := startRuleServer(t)
+	defer cleanup()
+
+	genSetter := newFakeGenSetter()
+	verSetter := newFakeVerSetter()
+
+	client := NewRuleClient(addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	client.SetGenerationSetter(genSetter)
+	client.SetVerificationSetter(verSetter)
+
+	// Before Run starts, neither stream has synced.
+	require.False(t, client.Ready())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	go client.Run(ctx)
+
+	// Server sends an initial (empty) snapshot on subscribe, so Ready should
+	// flip to true once both streams have received it.
+	require.Eventually(t, client.Ready, 3*time.Second, 20*time.Millisecond,
+		"client should report Ready after initial snapshots applied")
+
+	// Pushing a new snapshot should not flip Ready back to false.
+	rs.UpdateGenerationRules([]controller.GenerationRule{
+		{Namespace: "ns", Name: "r1"},
+	})
+	require.True(t, client.Ready())
+}
+
+func TestReady_GenOnly(t *testing.T) {
+	// Verification stream is not configured, so Ready should depend only on
+	// the generation stream syncing.
+	_, addr, cleanup := startRuleServer(t)
+	defer cleanup()
+
+	genSetter := newFakeGenSetter()
+	client := NewRuleClient(addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	client.SetGenerationSetter(genSetter)
+
+	require.False(t, client.Ready())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go client.Run(ctx)
+
+	require.Eventually(t, client.Ready, 3*time.Second, 20*time.Millisecond,
+		"client should report Ready after the generation snapshot is applied")
+}

@@ -30,6 +30,7 @@ extauth:
     pullPolicy: IfNotPresent
   replicas: 1
   port: 9000
+  healthPort: 9090
   resources:
     requests:
       cpu: 100m

@@ -33,6 +33,7 @@ spec:
           imagePullPolicy: {{ .Values.extauth.image.pullPolicy }}
           args:
             - --addr=:{{ .Values.extauth.port }}
+            - --health-addr=:{{ .Values.extauth.healthPort }}
             - --tts=http://kontxt-tts.{{ .Values.namespace }}.svc.cluster.local
             - --jwks=http://kontxt-tts.{{ .Values.namespace }}.svc.cluster.local/.well-known/jwks.json
             - --trust-domain={{ .Values.tts.config.trustDomain }}
@@ -42,6 +43,21 @@ spec:
             - containerPort: {{ .Values.extauth.port }}
               name: grpc
               protocol: TCP
+            - containerPort: {{ .Values.extauth.healthPort }}
+              name: health
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 1
+            periodSeconds: 2
           resources:
             {{- toYaml .Values.extauth.resources | nindent 12 }}
 ---
@@ -97,6 +113,7 @@ spec:
           imagePullPolicy: {{ .Values.extauth.image.pullPolicy }}
           args:
             - --addr=:{{ .Values.extauth.port }}
+            - --health-addr=:{{ .Values.extauth.healthPort }}
             - --tts=http://kontxt-tts.{{ .Values.namespace }}.svc.cluster.local
             - --jwks=http://kontxt-tts.{{ .Values.namespace }}.svc.cluster.local/.well-known/jwks.json
             - --trust-domain={{ .Values.tts.config.trustDomain }}
@@ -106,6 +123,21 @@ spec:
             - containerPort: {{ .Values.extauth.port }}
               name: grpc
               protocol: TCP
+            - containerPort: {{ .Values.extauth.healthPort }}
+              name: health
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 1
+            periodSeconds: 2
           resources:
             {{- toYaml .Values.extauth.resources | nindent 12 }}
 ---
