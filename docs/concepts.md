@@ -8,14 +8,21 @@ This page explains the core concepts behind kontxt and Transaction Tokens. For a
 
 A TxToken's life follows this path:
 
-```
-1. Client sends request with OAuth        2. Gateway intercepts,          3. TTS validates subject token,
-   access token (or K8s SA token)            calls ext auth adapter          builds tctx/rctx, signs TxToken
-   ────────────────────────────►             ──────────────────►             ──────────────────►
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant GW as Gateway
+    participant EA as Ext Auth Adapter
+    participant TTS as TTS
+    participant S as Downstream Services
 
-4. TxToken injected into request           5. Downstream services verify    6. Token expires (~15s)
-   as Txn-Token header                        the same unmodified token       — cannot be replayed
-   ────────────────────────────►             ──────────────────►             ──────────────────►
+    C->>GW: Request with OAuth access token<br/>(or K8s SA token)
+    GW->>EA: Gateway intercepts,<br/>calls ext auth adapter
+    EA->>TTS: Validate subject token
+    TTS-->>EA: Build tctx/rctx, sign TxToken
+    EA-->>GW: TxToken injected as<br/>Txn-Token header
+    GW->>S: Downstream services verify<br/>the same unmodified token
+    Note over S: Token expires (~15s)<br/>— cannot be replayed
 ```
 
 Key property: the TxToken is created **once** at the entry point and propagated **unmodified** through the entire call chain. Each downstream service verifies it independently. No service needs to call the TTS again (unless scope narrowing is requested).
@@ -138,17 +145,18 @@ TxToken scope can only **shrink** through the call chain — never expand. This 
    - The same `tctx` and `rctx` (immutable)
 3. The TTS rejects any attempt to expand scope beyond what the original token had.
 
-```
-Entry:      scope = "read:docs analyze:data admin:reports"
-     │
-     ▼
-Hop 1:      scope = "read:docs analyze:data"          ← admin:reports dropped
-     │
-     ▼
-Hop 2:      scope = "read:docs"                        ← analyze:data dropped
-     │
-     ▼
-Hop 3:      scope = "read:docs admin:reports"          ← REJECTED (can't re-add)
+```mermaid
+flowchart TD
+    Entry["Entry<br/>scope = read:docs analyze:data admin:reports"]
+    Hop1["Hop 1<br/>scope = read:docs analyze:data"]
+    Hop2["Hop 2<br/>scope = read:docs"]
+    Hop3["Hop 3<br/>scope = read:docs admin:reports"]
+
+    Entry -- "drop admin:reports" --> Hop1
+    Hop1 -- "drop analyze:data" --> Hop2
+    Hop2 -- "REJECTED: can't re-add admin:reports" --> Hop3
+
+    style Hop3 fill:#fdd,stroke:#c00
 ```
 
 ### Auto-narrowing

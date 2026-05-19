@@ -33,36 +33,27 @@ AgentGateway runs in two modes:
 
 The **TTS** and **TxToken Ext Auth Adapter** are identical across both modes — they implement the ext_authz gRPC proto and don't know which control plane manages AgentGateway.
 
-```
-                    ┌─────────────────────────────────────────────────────────┐
-                    │  Control Plane (either one)                             │
-                    │  ┌──────────────────┐  ┌─────────────────────────────┐ │
-                    │  │ AgentGateway's   │  │ Istiod                      │ │
-                    │  │ built-in K8s     │  │ (GatewayClass:              │ │
-                    │  │ controller       │  │  istio-agentgateway)        │ │
-                    │  │ (standalone)     │  │ + ztunnel at L4             │ │
-                    │  └────────┬─────────┘  └──────────┬──────────────────┘ │
-                    │           │   xDS                  │  xDS               │
-                    └───────────┼─────────────────────────┼───────────────────┘
-                                └────────────┬────────────┘
-                                             ▼
-                                 ┌───────────────────────┐
-                                 │  AgentGateway Proxy    │
-                                 │  (Rust, per-namespace) │
-                                 │  • MCP / A2A / HTTP    │
-                                 │  • ext_authz → adapter │
-                                 └───────────┬───────────┘
-                                             │
-                              ┌──────────────┼──────────────┐
-                              ▼              ▼              ▼
-                    ┌──────────────┐  ┌────────────┐  ┌────────────┐
-                    │ TxToken Ext  │  │  Service A │  │  Service B │
-                    │ Auth Adapter │  │  (no       │  │  (no       │
-                    │ (gRPC)       │  │   sidecar) │  │   sidecar) │
-                    │      │       │  └────────────┘  └────────────┘
-                    │      ▼       │
-                    │    TTS       │
-                    └──────────────┘
+```mermaid
+flowchart TD
+    subgraph CP["Control Plane (either one)"]
+        AGCtl["AgentGateway's built-in<br/>K8s controller (standalone)"]
+        Istiod["Istiod<br/>(GatewayClass: istio-agentgateway)<br/>+ ztunnel at L4"]
+    end
+
+    Proxy["AgentGateway Proxy<br/>(Rust, per-namespace)<br/>• MCP / A2A / HTTP<br/>• ext_authz → adapter"]
+
+    AGCtl -- xDS --> Proxy
+    Istiod -- xDS --> Proxy
+
+    EA["TxToken Ext Auth<br/>Adapter (gRPC)"]
+    TTS[TTS]
+    SvcA["Service A<br/>(no sidecar)"]
+    SvcB["Service B<br/>(no sidecar)"]
+
+    Proxy --> EA
+    Proxy --> SvcA
+    Proxy --> SvcB
+    EA --> TTS
 ```
 
 **Key invariant:** The TxToken is created once at the entry point (by the ext auth adapter calling the TTS) and propagated **unmodified** through the entire call chain. Each downstream hop is verified by the ext auth adapter when traffic passes through the AgentGateway. No sidecars.
@@ -305,15 +296,21 @@ The CRD design must split generation concerns (transaction owner) from verificat
    - Copies the `Txn-Token` header to outbound requests (unmodified)
 
 3. **Demo: 3-service call chain:**
+   ```mermaid
+   flowchart LR
+       Client --> A[Service A<br/>entry]
+       A --> B[Service B<br/>processor]
+       B --> C[Service C<br/>storage]
+
+       A -. exchange AT→TxToken .-> TTS
+       A -- set Txn-Token header --> B
+       B -- forward Txn-Token --> C
+       C -- log txn, sub, scope --> Audit[(audit log)]
    ```
-   Client → [Service A (entry)] → [Service B (processor)] → [Service C (storage)]
-                 │                        │                        │
-                 │ Exchange AT→TxToken    │ Verify TxToken        │ Verify TxToken
-                 │ Set Txn-Token header   │ Forward Txn-Token     │ Log txn, sub, scope
-                 │                        │                        │
-                 ▼                        ▼                        ▼
-              TTS                   (pass-through)           (terminal verify)
-   ```
+
+   - Service A: receives AT, calls TTS to exchange for TxToken
+   - Service B: pass-through verify
+   - Service C: terminal verify
    - Service A: Receives OAuth access token from client. Calls TTS to exchange for TxToken. Sets `Txn-Token` header on call to Service B.
    - Service B: Verifies TxToken. Forwards `Txn-Token` header unchanged to Service C. Logs `txn` for audit.
    - Service C: Verifies TxToken. Logs `txn`, `sub`, `scope`. Returns response.
@@ -700,46 +697,23 @@ Instead, contract enforcement happens at **runtime**: if a TxToken arrives at a 
 
 #### How the pieces fit together
 
-```
-            TokenPolicy (cluster-scoped, security admin)
-            ┌──────────────────────────────────────────┐
-            │ Constraints: max lifetime, scope ceiling, │
-            │ mandatory fields, authorized namespaces,  │
-            │ CEL issuance rules                        │
-            └──────────────────┬───────────────────────┘
-                               │ constrains
-                               ▼
-     TxTokenConfig (cluster-scoped, platform admin)
-     ┌──────────────────────────────────────────┐
-     │ Infrastructure: IdPs, trust domain,       │
-     │ workload auth, defaults                   │
-     └──────────────────┬───────────────────────┘
-                        │ configures
-                        ▼
-                   ┌─────────┐
-                   │   TTS   │
-                   └────┬────┘
-                        │
-     ┌──────────────────┴──────────────────────┐
-     │                                          │
-TransactionType                    ServiceTokenRequirement
-(ns: team-alpha,                   (ns: team-beta,
- transaction owner)                 service owner)
-┌────────────────────┐            ┌────────────────────┐
-│ "When my agent     │            │ "My service needs  │
-│  hits this endpoint│            │  these tctx fields │
-│  build tctx with   │            │  and this scope to │
-│  these fields"     │            │  authorize requests│
-└────────┬───────────┘            └────────┬───────────┘
-         │ generation rules                │ verification rules
-         ▼                                 ▼
-  Entry-point pod               Downstream service pod
-  (team-alpha)                  (team-beta)
-  ┌──────────────┐              ┌──────────────────┐
-  │ AgentGateway │  Txn-Token   │ AgentGateway     │
-  │ + ext auth   │──── header ──►│ + ext auth       │
-  │ (generates)  │              │ (verifies)       │
-  └──────────────┘              └──────────────────┘
+```mermaid
+flowchart TD
+    TP["TokenPolicy<br/>(cluster-scoped, security admin)<br/>Constraints: max lifetime, scope ceiling,<br/>mandatory fields, authorized namespaces,<br/>CEL issuance rules"]
+    TC["TxTokenConfig<br/>(cluster-scoped, platform admin)<br/>Infrastructure: IdPs, trust domain,<br/>workload auth, defaults"]
+    TTS[TTS]
+    TT["TransactionType<br/>(ns: team-alpha, transaction owner)<br/>When my agent hits this endpoint,<br/>build tctx with these fields"]
+    STR["ServiceTokenRequirement<br/>(ns: team-beta, service owner)<br/>My service needs these tctx fields<br/>and this scope to authorize requests"]
+    Entry["Entry-point pod (team-alpha)<br/>AgentGateway + ext auth<br/>(generates)"]
+    Down["Downstream service pod (team-beta)<br/>AgentGateway + ext auth<br/>(verifies)"]
+
+    TP -- constrains --> TC
+    TC -- configures --> TTS
+    TTS --> TT
+    TTS --> STR
+    TT -- generation rules --> Entry
+    STR -- verification rules --> Down
+    Entry -- Txn-Token header --> Down
 ```
 
 **Deliverable:** Four CRDs + controller + updated TTS. Each persona manages their own resources in their own namespace. The controller joins them and surfaces compatibility status.

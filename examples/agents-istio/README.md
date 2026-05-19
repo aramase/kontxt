@@ -4,24 +4,31 @@ An end-to-end demo of kontxt Transaction Tokens with AgentGateway programmed by 
 
 ## Architecture
 
-```
-                            ┌─────────────────────────────────────────────────────┐
-                            │  AgentGateway (programmed by istiod)                │
-                            │                                                     │
-  User ──── Bearer AT ────▶ │  /api/research ──ExternalAuth(generate)──▶ orchestr.│
-                            │                                            │   │    │
-                            │  /api/retrieve ──ExternalAuth(verify)──▶ retriever  │
-                            │                                            │        │
-                            │  /api/analyze  ──ExternalAuth(verify)──▶ analyzer   │
-                            │                                                     │
-                            │  /idp/*  ─────────────────────────▶  mock-idp       │
-                            └─────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    user([User])
+    subgraph gw["AgentGateway (programmed by istiod)"]
+        idp_route["/idp/*"]
+        research_route["/api/research<br/>ExternalAuth (generate)"]
+        retrieve_route["/api/retrieve<br/>ExternalAuth (verify)"]
+        analyze_route["/api/analyze<br/>ExternalAuth (verify)"]
+    end
+    idp[mock-idp]
+    orch[orchestrator]
+    retr[retriever]
+    anal[analyzer]
 
-  Control plane: istiod (single control plane)
-  Data plane: ztunnel (ambient mode — no sidecars)
-  Ext auth attachment: HTTPRoute ExternalAuth filter (Gateway API v1.5.0+)
-  Protocol: Envoy ext_authz v3 gRPC
+    user -- Bearer AT --> gw
+    idp_route --> idp
+    research_route --> orch
+    orch --> retrieve_route --> retr
+    orch --> analyze_route --> anal
 ```
+
+- Control plane: istiod (single control plane)
+- Data plane: ztunnel (ambient mode — no sidecars)
+- Ext auth attachment: HTTPRoute ExternalAuth filter (Gateway API v1.5.0+)
+- Protocol: Envoy ext_authz v3 gRPC
 
 **Key differences from standalone mode:**
 - **Single control plane**: istiod programs the agentgateway proxy (no kgateway controller needed)

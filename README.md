@@ -48,46 +48,37 @@ Transaction Tokens solve all of these: a TxToken is issued once at the entry poi
 
 **Before** — forwarding an OAuth access token through the chain:
 
+```mermaid
+flowchart LR
+    Client --> A[Agent A]
+    A -- AT --> B[Tool B]
+    B -- AT --> C[Service C]
 ```
-Client → Agent A → Tool B → Service C
-         │          │         │
-         │ AT ──────┘ AT ─────┘  Same long-lived token at every hop
-         │                       Any hop can replay it
-         │                       Service C has no idea why it was called
-         └── No transaction context, no audit correlation
-```
+
+Same long-lived token at every hop. Any hop can replay it. Service C has no idea why it was called. No transaction context, no audit correlation.
 
 **After** — using kontxt Transaction Tokens:
 
+```mermaid
+flowchart LR
+    Client -- OAuth AT --> GW[AgentGateway]
+    GW -- "TxToken (15s, scoped, tctx)" --> A[Agent A]
+    A -- "TxToken (scope can only shrink)" --> B[Tool B]
+    B -- "Same TxToken, verified at each hop" --> C[Service C]
 ```
-Client → AgentGateway → Agent A → Tool B → Service C
-         │                │         │         │
-         │ OAuth AT       │ TxToken  │ TxToken  │ Same TxToken, verified
-         │ exchanged      │ (15s,    │ (scope   │ independently at each hop
-         │ for TxToken    │  scoped, │  can only│
-         │ at entry       │  tctx:{  │  shrink) │
-         │                │  purpose,│         │
-         │                │  params})│         │
-         └── txn=abc-123 links every hop for audit
-```
+
+AT exchanged for TxToken at entry. `txn=abc-123` links every hop for audit.
 
 ## Architecture
 
-```
-┌──────────┐     ┌────────────────┐     ┌──────────────┐     ┌──────────────┐
-│  Client  │────▶│  AgentGateway  │────▶│  Service A   │────▶│  Service B   │
-│          │     │  + ext_authz   │     │              │     │              │
-└──────────┘     └───────┬────────┘     └──────────────┘     └──────────────┘
-                         │                                          │
-                    TxToken Ext Auth                          Verify TxToken
-                    Adapter (gRPC)                            (same token,
-                         │                                    unmodified)
-                         ▼
-                  ┌──────────────┐
-                  │     TTS      │
-                  │ (Transaction │
-                  │ Token Service)│
-                  └──────────────┘
+```mermaid
+flowchart LR
+    Client --> GW["AgentGateway<br/>+ ext_authz"]
+    GW --> A[Service A]
+    A --> B[Service B]
+    GW -. calls .-> EA["TxToken Ext Auth<br/>Adapter (gRPC)"]
+    EA --> TTS["TTS<br/>(Transaction Token Service)"]
+    B -. verifies same token .-> EA
 ```
 
 kontxt works with **AgentGateway** as the data plane — either standalone (own Kubernetes controller) or managed by Istiod (`istio-agentgateway` GatewayClass). The TxToken Ext Auth Adapter implements the standard Envoy ext_authz v3 gRPC proto, making it portable across any Envoy-compatible proxy.

@@ -4,18 +4,25 @@ An end-to-end demo of kontxt Transaction Tokens with AgentGateway, showing autom
 
 ## Architecture
 
-```
-                            ┌─────────────────────────────────────────────────────┐
-                            │  AgentGateway                                       │
-                            │                                                     │
-  User ──── Bearer AT ────▶ │  /api/research ──ext_authz(generate)──▶ orchestrator│
-                            │                                            │   │    │
-                            │  /api/retrieve ──ext_authz(verify)───▶ retriever    │
-                            │                                            │        │
-                            │  /api/analyze  ──ext_authz(verify)───▶ analyzer     │
-                            │                                                     │
-                            │  /idp/*  ─────────────────────────▶  mock-idp       │
-                            └─────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    user([User])
+    subgraph gw["AgentGateway"]
+        idp_route["/idp/*"]
+        research_route["/api/research<br/>ext_authz (generate)"]
+        retrieve_route["/api/retrieve<br/>ext_authz (verify)"]
+        analyze_route["/api/analyze<br/>ext_authz (verify)"]
+    end
+    idp[mock-idp]
+    orch[orchestrator]
+    retr[retriever]
+    anal[analyzer]
+
+    user -- Bearer AT --> gw
+    idp_route --> idp
+    research_route --> orch
+    orch --> retrieve_route --> retr
+    orch --> analyze_route --> anal
 ```
 
 **Flow:**
