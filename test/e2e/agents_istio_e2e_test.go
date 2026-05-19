@@ -22,7 +22,7 @@ const (
 	istioKubeContext = "kind-" + istioClusterName
 	istioDemoNS      = "demo"
 	istioSystemNS    = "istio-system"
-	istioGatewaySvc  = "demo-gateway-istio-agentgateway"
+	istioGatewaySvc  = "demo-gateway"
 )
 
 var istioRepoRoot string
@@ -264,79 +264,21 @@ func deployIstioStack() error {
 }
 
 func installIstioForTest() error {
-	istioPath := os.Getenv("ISTIO_PATH")
-
-	if istioPath != "" {
-		// Build and install from source.
-		return installIstioFromSource(istioPath)
+	if _, err := exec.LookPath("istioctl"); err != nil {
+		return fmt.Errorf("istioctl not found. Install istioctl 1.30+ from https://istio.io/latest/docs/setup/getting-started/#download")
 	}
 
-	// Try using istioctl if available.
-	if _, err := exec.LookPath("istioctl"); err == nil {
-		args := []string{"install", "--context", istioKubeContext, "-y",
-			"--set", "profile=ambient",
-			"--set", "values.pilot.env.PILOT_ENABLE_AGENTGATEWAY=true",
-			"--set", "meshConfig.accessLogFile=/dev/stdout",
-		}
-		// Allow overriding the image hub (e.g. for alpha/pre-release builds).
-		hub := os.Getenv("ISTIO_HUB")
-		if hub != "" {
-			args = append(args, "--set", "hub="+hub)
-		}
-		return runIstioCmdNoOutput("istioctl", args...)
-	}
-
-	return fmt.Errorf("istioctl not found. Set ISTIO_PATH to an istio source checkout or install istioctl 1.30+")
-}
-
-func installIstioFromSource(istioPath string) error {
-	fmt.Printf("Building Istio from source at %s...\n", istioPath)
-
-	// Build istioctl.
-	buildCmd := exec.Command("make", "build-istioctl")
-	buildCmd.Dir = istioPath
-	buildCmd.Stdout = os.Stdout
-	buildCmd.Stderr = os.Stderr
-	if err := buildCmd.Run(); err != nil {
-		return fmt.Errorf("building istioctl: %w", err)
-	}
-
-	// Build pilot image.
-	pilotCmd := exec.Command("make", "docker.pilot")
-	pilotCmd.Dir = istioPath
-	pilotCmd.Stdout = os.Stdout
-	pilotCmd.Stderr = os.Stderr
-	if err := pilotCmd.Run(); err != nil {
-		return fmt.Errorf("building pilot image: %w", err)
-	}
-
-	// Find the built istioctl.
-	goarch, _ := runIstioCmd("go", "env", "GOARCH")
-	goarch = strings.TrimSpace(goarch)
-	goos, _ := runIstioCmd("go", "env", "GOOS")
-	goos = strings.TrimSpace(goos)
-
-	istioctlBin := filepath.Join(istioPath, "out", goos+"_"+goarch, "istioctl")
-	if _, err := os.Stat(istioctlBin); err != nil {
-		return fmt.Errorf("istioctl binary not found at %s", istioctlBin)
-	}
-
-	// Load pilot image into kind.
-	pilotImages, _ := runIstioCmd("docker", "images", "--format", "{{.Repository}}:{{.Tag}}", "--filter", "reference=*pilot*")
-	for _, img := range strings.Split(pilotImages, "\n") {
-		img = strings.TrimSpace(img)
-		if img != "" && strings.Contains(img, "pilot") {
-			fmt.Printf("  Loading pilot image: %s\n", img)
-			_ = runIstioCmdNoOutput("kind", "load", "docker-image", img, "--name", istioClusterName)
-			break
-		}
-	}
-
-	// Install.
-	return runIstioCmdNoOutput(istioctlBin, "install", "--context", istioKubeContext, "-y",
+	args := []string{"install", "--context", istioKubeContext, "-y",
 		"--set", "profile=ambient",
 		"--set", "values.pilot.env.PILOT_ENABLE_AGENTGATEWAY=true",
-		"--set", "meshConfig.accessLogFile=/dev/stdout")
+		"--set", "meshConfig.accessLogFile=/dev/stdout",
+	}
+	// Allow overriding the image hub (e.g. for alternate registries).
+	hub := os.Getenv("ISTIO_HUB")
+	if hub != "" {
+		args = append(args, "--set", "hub="+hub)
+	}
+	return runIstioCmdNoOutput("istioctl", args...)
 }
 
 func cleanupIstioCluster() {

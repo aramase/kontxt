@@ -44,10 +44,7 @@ An end-to-end demo of kontxt Transaction Tokens with AgentGateway programmed by 
 - [Docker](https://docs.docker.com/get-docker/)
 - [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
 - `kubectl`, `helm`, `jq`
-- One of:
-  - `istioctl` 1.30+ installed
-  - An Istio source checkout (set `ISTIO_PATH`)
-  - `go` toolchain (script will clone and build istio/istio from master)
+- `istioctl` 1.30+ ([download](https://istio.io/latest/docs/setup/getting-started/#download))
 
 ## Quick Start
 
@@ -59,19 +56,13 @@ The script will:
 1. Create a kind cluster (or reuse an existing one)
 2. Build and load all kontxt images
 3. Install Gateway API **experimental** CRDs (required for ExternalAuth filter)
-4. Install Istio **ambient profile** with the `PILOT_ENABLE_AGENTGATEWAY=true` feature flag (from release or built from source)
+4. Install Istio **ambient profile** with the `PILOT_ENABLE_AGENTGATEWAY=true` feature flag
 5. Deploy the demo services (mock-idp, orchestrator, retriever, analyzer)
 6. Install kontxt (TTS, ext auth, controller) with `istio.enabled=true`
 7. Apply kontxt CRD instances
 8. Deploy a second ext auth adapter in generate mode
 9. Apply Gateway, HTTPRoutes with ExternalAuth filters, and ReferenceGrant
 10. Print port-forward instructions and example curl commands
-
-### Using an existing Istio checkout
-
-```bash
-ISTIO_PATH=/path/to/istio ./setup.sh
-```
 
 ### Using an existing kind cluster
 
@@ -84,7 +75,7 @@ KIND_CLUSTER_NAME=my-cluster ./setup.sh
 Once `setup.sh` completes, port-forward to the gateway:
 
 ```bash
-kubectl port-forward -n demo svc/demo-gateway-istio-agentgateway 8080:80
+kubectl port-forward -n demo svc/demo-gateway 8080:80
 ```
 
 Then in another terminal:

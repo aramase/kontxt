@@ -5,12 +5,11 @@ set -euo pipefail
 # setup.sh — Deploy the kontxt AI Research Assistant demo
 #             with Istio + AgentGateway (istiod as control plane)
 # ============================================================
-# Prerequisites: docker, kind, kubectl, helm, go (for building Istio from source)
+# Prerequisites: docker, kind, kubectl, helm, istioctl 1.30+
 #
 # Usage:
 #   ./setup.sh                              # creates a new kind cluster
 #   KIND_CLUSTER_NAME=my-cluster ./setup.sh  # use an existing cluster
-#   ISTIO_PATH=/path/to/istio ./setup.sh     # skip cloning istio/istio
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,9 +19,6 @@ KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-kontxt-istio-demo}"
 KONTXT_NS="kontxt-system"
 DEMO_NS="demo"
 ISTIO_NS="istio-system"
-
-# Allow user to provide an existing Istio checkout.
-ISTIO_PATH="${ISTIO_PATH:-}"
 
 # Gateway API version — must be experimental channel for ExternalAuth filter.
 GATEWAY_API_VERSION="${GATEWAY_API_VERSION:-v1.5.0}"
@@ -77,115 +73,28 @@ kubectl --context "${KUBE_CONTEXT}" apply --server-side --force-conflicts \
   -f "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_API_VERSION}/experimental-install.yaml"
 
 # ---- 4. Install Istio with AGENTGATEWAY feature flag ----
-# AgentGateway support requires Istio 1.30+ (currently alpha). The default
-# istioctl hub for alpha builds points to registry.istio.io/testing which
-# doesn't publish images publicly, so we default to docker.io/istio which
-# mirrors the release images.
-ISTIO_HUB="${ISTIO_HUB:-docker.io/istio}"
+# AgentGateway support is GA in Istio 1.30+.
 
-install_istio_from_release() {
-  echo "==> Installing Istio (ambient profile) from hub=${ISTIO_HUB}..."
-  istioctl install --context "${KUBE_CONTEXT}" -y \
-    --set profile=ambient \
-    --set hub="${ISTIO_HUB}" \
-    --set values.pilot.env.PILOT_ENABLE_AGENTGATEWAY=true \
-    --set meshConfig.accessLogFile=/dev/stdout
-}
-
-install_istio_from_source() {
-  local istio_dir="$1"
-  echo "==> Building Istio from source at ${istio_dir}..."
-
-  pushd "${istio_dir}" > /dev/null
-
-  # Build istioctl
-  echo "    Building istioctl..."
-  make build-istioctl
-
-  # Build pilot (istiod) image
-  echo "    Building pilot image..."
-  make docker.pilot
-
-  # Build ztunnel image (required for ambient mode)
-  echo "    Building ztunnel image..."
-  make docker.ztunnel || echo "    Warning: ztunnel build failed, using pre-built image if available"
-
-  # Determine the built image tags.
-  # Istio Makefile sets HUB and TAG; default HUB is localhost:5000 for local builds.
-  local hub
-  local tag
-  hub=$(grep -m1 '^HUB ' Makefile.core.mk 2>/dev/null | awk '{print $NF}' || echo "")
-  tag=$(grep -m1 '^TAG ' Makefile.core.mk 2>/dev/null | awk '{print $NF}' || echo "")
-
-  # Use the output binary and image from the build
-  local istioctl_bin="out/linux_$(go env GOARCH)/istioctl"
-  if [ ! -f "${istioctl_bin}" ]; then
-    istioctl_bin="out/$(go env GOOS)_$(go env GOARCH)/istioctl"
-  fi
-
-  if [ ! -f "${istioctl_bin}" ]; then
-    echo "ERROR: istioctl binary not found after build"
-    popd > /dev/null
-    return 1
-  fi
-
-  # Load the pilot image into kind
-  echo "    Loading pilot and ztunnel images into kind..."
-  local pilot_image
-  if [ -n "${hub}" ] && [ -n "${tag}" ]; then
-    pilot_image="${hub}/pilot:${tag}"
-  else
-    # Try common default
-    pilot_image="istio/pilot:latest"
-  fi
-
-  # Try to load, but the image may be named differently depending on build mode.
-  # Use docker images to find the actual tag.
-  local actual_image
-  actual_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep 'pilot' | head -1 || echo "")
-  if [ -n "${actual_image}" ]; then
-    pilot_image="${actual_image}"
-  fi
-
-  kind load docker-image "${pilot_image}" --name "${KIND_CLUSTER_NAME}" 2>/dev/null || true
-
-  # Load ztunnel image
-  local ztunnel_image
-  ztunnel_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep 'ztunnel' | head -1 || echo "")
-  if [ -n "${ztunnel_image}" ]; then
-    kind load docker-image "${ztunnel_image}" --name "${KIND_CLUSTER_NAME}" 2>/dev/null || true
-  fi
-
-  echo "    Installing Istio (ambient profile) with istioctl..."
-  "${istioctl_bin}" install --context "${KUBE_CONTEXT}" -y \
-    --set profile=ambient \
-    --set values.pilot.env.PILOT_ENABLE_AGENTGATEWAY=true \
-    --set meshConfig.accessLogFile=/dev/stdout \
-    --set hub="${hub}" \
-    --set tag="${tag}"
-
-  popd > /dev/null
-}
-
-# Determine Istio install method.
-if command -v istioctl &>/dev/null; then
-  ISTIO_VERSION=$(istioctl version --remote=false 2>/dev/null || echo "unknown")
-  echo "==> Found istioctl version: ${ISTIO_VERSION}"
-  # If istioctl is 1.30+ or a dev build, use it directly.
-  install_istio_from_release
-elif [ -n "${ISTIO_PATH}" ] && [ -d "${ISTIO_PATH}" ]; then
-  # User provided an Istio source checkout.
-  install_istio_from_source "${ISTIO_PATH}"
-else
-  # Clone and build Istio from master.
-  echo "==> istioctl not found and ISTIO_PATH not set."
-  echo "    Cloning istio/istio master to build from source..."
-  ISTIO_TMP="$(mktemp -d)"
-  trap "rm -rf '${ISTIO_TMP}'" EXIT
-  git clone --depth 1 https://github.com/istio/istio.git "${ISTIO_TMP}/istio"
-  ISTIO_PATH="${ISTIO_TMP}/istio"
-  install_istio_from_source "${ISTIO_PATH}"
+if ! command -v istioctl &>/dev/null; then
+  echo "ERROR: istioctl not found. Install istioctl 1.30+ from https://istio.io/latest/docs/setup/getting-started/#download"
+  exit 1
 fi
+
+ISTIO_VERSION=$(istioctl version --remote=false 2>/dev/null || echo "unknown")
+echo "==> Found istioctl version: ${ISTIO_VERSION}"
+
+echo "==> Installing Istio (ambient profile)..."
+ISTIO_INSTALL_ARGS=(
+  install --context "${KUBE_CONTEXT}" -y
+  --set profile=ambient
+  --set values.pilot.env.PILOT_ENABLE_AGENTGATEWAY=true
+  --set meshConfig.accessLogFile=/dev/stdout
+)
+# Allow overriding the image hub (e.g. for air-gapped or mirrored registries).
+if [ -n "${ISTIO_HUB:-}" ]; then
+  ISTIO_INSTALL_ARGS+=(--set hub="${ISTIO_HUB}")
+fi
+istioctl "${ISTIO_INSTALL_ARGS[@]}"
 
 # Wait for istiod to be ready
 echo "==> Waiting for istiod..."
@@ -257,7 +166,7 @@ echo "============================================"
 echo ""
 echo "To test, port-forward to the gateway:"
 echo ""
-echo "  kubectl --context ${KUBE_CONTEXT} port-forward -n ${DEMO_NS} svc/demo-gateway-istio-agentgateway 8080:80"
+echo "  kubectl --context ${KUBE_CONTEXT} port-forward -n ${DEMO_NS} svc/demo-gateway 8080:80"
 echo ""
 echo "Then in another terminal:"
 echo ""
