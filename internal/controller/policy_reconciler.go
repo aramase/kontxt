@@ -54,11 +54,14 @@ func (r *TokenPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if len(compileErrs) > 0 {
 		setCondition(&policy.Status.Conditions, ConditionPolicyCompliant, metav1.ConditionFalse,
 			"CELCompilationError", fmt.Sprintf("CEL errors: %v", compileErrs))
+		setCondition(&policy.Status.Conditions, ConditionReady, metav1.ConditionFalse,
+			"CELCompilationError", fmt.Sprintf("one or more issuance rules failed to compile: %v", compileErrs))
 	} else {
 		setCondition(&policy.Status.Conditions, ConditionPolicyCompliant, metav1.ConditionTrue,
 			"Compliant", "all issuance rules compiled successfully")
+		setCondition(&policy.Status.Conditions, ConditionReady, metav1.ConditionTrue,
+			"Reconciled", "issuance rules updated")
 	}
-	setCondition(&policy.Status.Conditions, ConditionReady, metav1.ConditionTrue, "Reconciled", "issuance rules updated")
 
 	if err := r.Status().Update(ctx, &policy); err != nil {
 		logger.Error(err, "failed to update status")

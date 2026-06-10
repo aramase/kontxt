@@ -118,6 +118,13 @@ func TestTokenPolicyReconciler_BrokenCEL_DroppedAndStatusFalse(t *testing.T) {
 	require.NotNil(t, cond)
 	assert.Equal(t, metav1.ConditionFalse, cond.Status)
 	assert.Contains(t, cond.Message, "broken")
+
+	// Ready must also flip to False so operators see one consistent signal —
+	// matches ServiceTokenRequirementReconciler's behavior on CEL errors.
+	ready := findCondition(updated.Status.Conditions, ConditionReady)
+	require.NotNil(t, ready)
+	assert.Equal(t, metav1.ConditionFalse, ready.Status)
+	assert.Equal(t, "CELCompilationError", ready.Reason)
 }
 
 func TestTokenPolicyReconciler_MultiplePolicies_Flattened(t *testing.T) {
