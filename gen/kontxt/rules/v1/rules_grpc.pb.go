@@ -40,9 +40,10 @@ type RuleDiscoveryServiceClient interface {
 	// to ext-auth instances running in verification mode.
 	StreamVerificationRules(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[StreamVerificationRulesRequest, StreamVerificationRulesResponse], error)
 	// StreamIssuanceRules streams issuance rules (from TokenPolicy CRDs) to the
-	// TTS. Rules are pre-resolved by the controller for the requesting workload's
-	// namespace: each rule carries the namespace it applies to, and the TTS
-	// evaluates the union of matching rules conjunctively at exchange time.
+	// TTS. Each IssuanceRule carries the full list of target namespaces the rule
+	// applies to (empty means cluster-wide); the TTS receives every rule across
+	// every TokenPolicy and filters per-request against the requesting workload's
+	// namespace, evaluating the surviving rules conjunctively at exchange time.
 	StreamIssuanceRules(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[StreamIssuanceRulesRequest, StreamIssuanceRulesResponse], error)
 }
 
@@ -109,9 +110,10 @@ type RuleDiscoveryServiceServer interface {
 	// to ext-auth instances running in verification mode.
 	StreamVerificationRules(grpc.BidiStreamingServer[StreamVerificationRulesRequest, StreamVerificationRulesResponse]) error
 	// StreamIssuanceRules streams issuance rules (from TokenPolicy CRDs) to the
-	// TTS. Rules are pre-resolved by the controller for the requesting workload's
-	// namespace: each rule carries the namespace it applies to, and the TTS
-	// evaluates the union of matching rules conjunctively at exchange time.
+	// TTS. Each IssuanceRule carries the full list of target namespaces the rule
+	// applies to (empty means cluster-wide); the TTS receives every rule across
+	// every TokenPolicy and filters per-request against the requesting workload's
+	// namespace, evaluating the surviving rules conjunctively at exchange time.
 	StreamIssuanceRules(grpc.BidiStreamingServer[StreamIssuanceRulesRequest, StreamIssuanceRulesResponse]) error
 	mustEmbedUnimplementedRuleDiscoveryServiceServer()
 }

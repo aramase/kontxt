@@ -679,9 +679,14 @@ func (x *IssuanceRulesSnapshot) GetRules() []*IssuanceRule {
 
 // IssuanceRulesDelta contains incremental changes to issuance rules.
 type IssuanceRulesDelta struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Upserted      []*IssuanceRule        `protobuf:"bytes,1,rep,name=upserted,proto3" json:"upserted,omitempty"`
-	Removed       []*RuleRef             `protobuf:"bytes,2,rep,name=removed,proto3" json:"removed,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Upserted []*IssuanceRule        `protobuf:"bytes,1,rep,name=upserted,proto3" json:"upserted,omitempty"`
+	// removed entries identify TokenPolicy objects (not individual rules) whose
+	// rules should be dropped from the receiver's cache. The reconciler republishes
+	// every IssuanceRule in a TokenPolicy on each Reconcile, so removal works at
+	// policy granularity: drop all rules whose (PolicyNamespace, PolicyName) match
+	// the RuleRef's (namespace, name).
+	Removed       []*RuleRef `protobuf:"bytes,2,rep,name=removed,proto3" json:"removed,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

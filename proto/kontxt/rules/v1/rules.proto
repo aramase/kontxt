@@ -16,9 +16,10 @@ service RuleDiscoveryService {
   rpc StreamVerificationRules(stream StreamVerificationRulesRequest) returns (stream StreamVerificationRulesResponse);
 
   // StreamIssuanceRules streams issuance rules (from TokenPolicy CRDs) to the
-  // TTS. Rules are pre-resolved by the controller for the requesting workload's
-  // namespace: each rule carries the namespace it applies to, and the TTS
-  // evaluates the union of matching rules conjunctively at exchange time.
+  // TTS. Each IssuanceRule carries the full list of target namespaces the rule
+  // applies to (empty means cluster-wide); the TTS receives every rule across
+  // every TokenPolicy and filters per-request against the requesting workload's
+  // namespace, evaluating the surviving rules conjunctively at exchange time.
   rpc StreamIssuanceRules(stream StreamIssuanceRulesRequest) returns (stream StreamIssuanceRulesResponse);
 }
 
@@ -101,6 +102,11 @@ message IssuanceRulesSnapshot {
 // IssuanceRulesDelta contains incremental changes to issuance rules.
 message IssuanceRulesDelta {
   repeated IssuanceRule upserted = 1;
+  // removed entries identify TokenPolicy objects (not individual rules) whose
+  // rules should be dropped from the receiver's cache. The reconciler republishes
+  // every IssuanceRule in a TokenPolicy on each Reconcile, so removal works at
+  // policy granularity: drop all rules whose (PolicyNamespace, PolicyName) match
+  // the RuleRef's (namespace, name).
   repeated RuleRef removed = 2;
 }
 
