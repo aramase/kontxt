@@ -1,6 +1,7 @@
 package tts
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,14 +11,21 @@ import (
 	"github.com/aramase/kontxt/pkg/authn"
 	"github.com/aramase/kontxt/pkg/keys"
 	"github.com/aramase/kontxt/pkg/token"
-	"github.com/aramase/kontxt/sdk/verify"
 )
+
+// TokenVerifier verifies a TxToken JWT and returns its claims. The handler
+// uses this for token-replacement requests (subject_token_type=txn_token).
+// Implemented by *verify.Verifier (JWKS-over-HTTP) and by the TTS's own
+// in-process verifier backed by keys.Manager.
+type TokenVerifier interface {
+	Verify(ctx context.Context, tokenString string) (*token.Claims, error)
+}
 
 // Handler processes RFC 8693 token exchange requests and issues TxTokens.
 type Handler struct {
 	router        *authn.Router
 	keyManager    *keys.Manager
-	verifier      *verify.Verifier // for token replacement (verifying existing TxTokens)
+	verifier      TokenVerifier // for token replacement (verifying existing TxTokens)
 	issuer        string
 	trustDomain   string
 	lifetime      time.Duration
@@ -36,7 +44,7 @@ func NewHandler(router *authn.Router, keyManager *keys.Manager, issuer, trustDom
 }
 
 // SetVerifier sets the TxToken verifier for token replacement support.
-func (h *Handler) SetVerifier(v *verify.Verifier) {
+func (h *Handler) SetVerifier(v TokenVerifier) {
 	h.verifier = v
 }
 

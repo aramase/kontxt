@@ -36,6 +36,13 @@ func NewServer(cfg *Config) (*Server, error) {
 	router := authn.NewRouter(authenticators)
 	handler := NewHandler(router, keyMgr, cfg.Issuer, cfg.TrustDomain, cfg.DefaultTokenLifetime())
 
+	// Wire an in-process self-verifier so token replacement
+	// (subject_token_type=txn_token) works without the TTS having to reach
+	// itself over HTTP. cfg.Issuer is the `iss` claim identifier (often an
+	// https URL) and the TTS Service is plain HTTP, so a network-based
+	// verifier would fail TLS or DNS depending on the deployment.
+	handler.SetVerifier(newLocalVerifier(keyMgr, cfg.TrustDomain))
+
 	mux := http.NewServeMux()
 	mux.Handle("POST /token_endpoint", handler)
 	mux.Handle("GET /.well-known/jwks.json", keyMgr.JWKSHandler())
