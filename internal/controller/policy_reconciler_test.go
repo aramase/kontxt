@@ -230,3 +230,33 @@ func findCondition(conds []metav1.Condition, condType string) *metav1.Condition 
 	}
 	return nil
 }
+
+// TestValidateIssuanceCEL_FastPathAllValid asserts that a rule set with no
+// errors short-circuits before any per-rule fallback runs.
+func TestValidateIssuanceCEL_FastPathAllValid(t *testing.T) {
+	errs := validateIssuanceCEL([]v1alpha1.IssuanceRule{
+		{Name: "r1", CEL: "true", Message: "m"},
+		{Name: "r2", CEL: "subject == 'alice'", Message: "m"},
+		{Name: "r3", CEL: "scope.startsWith('read:')", Message: "m"},
+	})
+	assert.Empty(t, errs)
+}
+
+// TestValidateIssuanceCEL_FallbackSurfacesAllErrors asserts that when the
+// fast-path aggregate compile fails, every broken rule (not just the first)
+// is surfaced in one pass — this is the contract the per-rule fallback exists
+// to uphold.
+func TestValidateIssuanceCEL_FallbackSurfacesAllErrors(t *testing.T) {
+	errs := validateIssuanceCEL([]v1alpha1.IssuanceRule{
+		{Name: "ok", CEL: "true", Message: "m"},
+		{Name: "broken-1", CEL: "this is not CEL", Message: "m"},
+		{Name: "broken-2", CEL: "also not CEL %%", Message: "m"},
+	})
+	got := make(map[string]bool, len(errs))
+	for _, e := range errs {
+		got[e.ruleName] = true
+	}
+	assert.False(t, got["ok"], "valid rule should not appear in errs")
+	assert.True(t, got["broken-1"], "first broken rule should be reported")
+	assert.True(t, got["broken-2"], "second broken rule should also be reported in the same pass")
+}

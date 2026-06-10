@@ -162,8 +162,17 @@ func validateIssuanceCEL(rules []v1alpha1.IssuanceRule) []issuanceCELError {
 		configs[i] = tts.IssuanceRuleConfig{Name: r.Name, CEL: r.CEL, Message: r.Message}
 	}
 
-	// CompileIssuanceRules stops at the first failure, so iterate per-rule to
-	// surface every broken rule in one reconcile pass.
+	// Fast path: compile the whole set in a single CompileIssuanceRules call so
+	// the CEL environment is built only once. In the common (all-valid) case
+	// this avoids rebuilding the env per rule during every reconcile and during
+	// rebuildIssuanceRules' full list pass.
+	if _, err := tts.CompileIssuanceRules(configs); err == nil {
+		return nil
+	}
+
+	// At least one rule is broken; fall back to per-rule compilation so we
+	// surface every broken rule in a single reconcile pass (CompileIssuanceRules
+	// stops at the first failure).
 	var errs []issuanceCELError
 	for _, cfg := range configs {
 		if _, err := tts.CompileIssuanceRules([]tts.IssuanceRuleConfig{cfg}); err != nil {
