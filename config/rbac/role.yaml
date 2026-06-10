@@ -18,6 +18,7 @@ rules:
   - kontxt.io
   resources:
   - servicetokenrequirements/status
+  - tokenpolicies/status
   - transactiontypes/status
   verbs:
   - get

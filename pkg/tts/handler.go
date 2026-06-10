@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/aramase/kontxt/pkg/authn"
@@ -23,13 +24,19 @@ type TokenVerifier interface {
 
 // Handler processes RFC 8693 token exchange requests and issues TxTokens.
 type Handler struct {
-	router        *authn.Router
-	keyManager    *keys.Manager
-	verifier      TokenVerifier // for token replacement (verifying existing TxTokens)
-	issuer        string
-	trustDomain   string
-	lifetime      time.Duration
-	issuanceRules []IssuanceRule
+	router      *authn.Router
+	keyManager  *keys.Manager
+	verifier    TokenVerifier // for token replacement (verifying existing TxTokens)
+	issuer      string
+	trustDomain string
+	lifetime    time.Duration
+	// issuanceRules holds the current compiled rule set. Stored as an
+	// atomic.Pointer so SetIssuanceRules (called from the rule-streaming
+	// goroutine) and ServeHTTP (called from the HTTP server's request
+	// goroutines) can read/swap the slice without locks or data races.
+	// The pointed-to slice is treated as immutable; updates replace the
+	// pointer with a fresh slice rather than mutating in place.
+	issuanceRules atomic.Pointer[[]IssuanceRule]
 }
 
 // NewHandler creates a new token exchange handler.
@@ -48,9 +55,29 @@ func (h *Handler) SetVerifier(v TokenVerifier) {
 	h.verifier = v
 }
 
-// SetIssuanceRules updates the compiled issuance rules evaluated before token issuance.
+// SetIssuanceRules atomically replaces the compiled issuance rules evaluated
+// before token issuance. Safe to call concurrently with ServeHTTP. The rules
+// slice and every IssuanceRule.TargetNamespaces slice are deep-copied so the
+// caller can reuse or mutate its inputs without affecting the stored snapshot.
 func (h *Handler) SetIssuanceRules(rules []IssuanceRule) {
-	h.issuanceRules = rules
+	snapshot := make([]IssuanceRule, len(rules))
+	for i, r := range rules {
+		if r.TargetNamespaces != nil {
+			ns := make([]string, len(r.TargetNamespaces))
+			copy(ns, r.TargetNamespaces)
+			r.TargetNamespaces = ns
+		}
+		snapshot[i] = r
+	}
+	h.issuanceRules.Store(&snapshot)
+}
+
+// loadIssuanceRules returns the current rule set, or nil if none have been set.
+func (h *Handler) loadIssuanceRules() []IssuanceRule {
+	if p := h.issuanceRules.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 // TokenExchangeRequest represents the parsed RFC 8693 token exchange parameters.
@@ -112,7 +139,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	workloadID := identifyWorkload(r)
 
 	// Evaluate CEL issuance rules (if configured)
-	if len(h.issuanceRules) > 0 {
+	if rules := h.loadIssuanceRules(); len(rules) > 0 {
 		ictx := &IssuanceContext{
 			Subject:    subjectInfo.Subject,
 			Scope:      req.Scope,
@@ -121,7 +148,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Workload:   workloadID,
 			WorkloadNS: "", // populated by ext auth adapter in production
 		}
-		if err := EvaluateIssuanceRules(h.issuanceRules, ictx); err != nil {
+		if err := EvaluateIssuanceRules(rules, ictx); err != nil {
 			writeError(w, http.StatusForbidden, "policy_denied", err.Error())
 			return
 		}

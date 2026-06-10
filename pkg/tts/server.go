@@ -13,6 +13,11 @@ type Server struct {
 	handler    *Handler
 	keyManager *keys.Manager
 	mux        *http.ServeMux
+
+	// readyFn returns nil when the server has finished any optional bootstrap
+	// (e.g. an initial issuance-rules snapshot from the controller). When nil,
+	// /readyz reports ready immediately.
+	readyFn func() error
 }
 
 // NewServer creates a new TTS server from configuration.
@@ -51,11 +56,23 @@ func NewServer(cfg *Config) (*Server, error) {
 		w.Write([]byte("ok"))
 	})
 
-	return &Server{
+	srv := &Server{
 		handler:    handler,
 		keyManager: keyMgr,
 		mux:        mux,
-	}, nil
+	}
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		if srv.readyFn != nil {
+			if err := srv.readyFn(); err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ready"))
+	})
+
+	return srv, nil
 }
 
 // Handler returns the HTTP handler for the TTS server.
@@ -66,4 +83,16 @@ func (s *Server) Handler() http.Handler {
 // KeyManager returns the key manager (for testing).
 func (s *Server) KeyManager() *keys.Manager {
 	return s.keyManager
+}
+
+// TokenHandler returns the token-exchange Handler so external wiring can call
+// SetIssuanceRules / SetVerifier on it.
+func (s *Server) TokenHandler() *Handler {
+	return s.handler
+}
+
+// SetReadyCheck installs a readiness function. /readyz returns 503 with the
+// returned error's message until it returns nil. Passing nil clears the check.
+func (s *Server) SetReadyCheck(fn func() error) {
+	s.readyFn = fn
 }

@@ -22,12 +22,15 @@ type RuleServer struct {
 	mu                sync.RWMutex
 	generationRules   []controller.GenerationRule
 	verificationRules []controller.VerificationRule
+	issuanceRules     []controller.IssuanceRule
 
 	genVersion atomic.Uint64
 	verVersion atomic.Uint64
+	issVersion atomic.Uint64
 
 	genSubscribers map[string]chan *rulesv1.StreamGenerationRulesResponse
 	verSubscribers map[string]chan *rulesv1.StreamVerificationRulesResponse
+	issSubscribers map[string]chan *rulesv1.StreamIssuanceRulesResponse
 
 	subIDCounter atomic.Uint64
 }
@@ -37,6 +40,7 @@ func NewRuleServer() *RuleServer {
 	return &RuleServer{
 		genSubscribers: make(map[string]chan *rulesv1.StreamGenerationRulesResponse),
 		verSubscribers: make(map[string]chan *rulesv1.StreamVerificationRulesResponse),
+		issSubscribers: make(map[string]chan *rulesv1.StreamIssuanceRulesResponse),
 	}
 }
 
@@ -102,6 +106,46 @@ func (s *RuleServer) StreamVerificationRules(stream rulesv1.RuleDiscoveryService
 	defer func() {
 		s.mu.Lock()
 		delete(s.verSubscribers, id)
+		s.mu.Unlock()
+	}()
+
+	if err := stream.Send(snapshot); err != nil {
+		return err
+	}
+
+	for {
+		select {
+		case <-stream.Context().Done():
+			return stream.Context().Err()
+		case resp, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			if err := stream.Send(resp); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// StreamIssuanceRules implements the bidirectional streaming RPC for issuance
+// rules pushed to the TTS.
+func (s *RuleServer) StreamIssuanceRules(stream rulesv1.RuleDiscoveryService_StreamIssuanceRulesServer) error {
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+
+	id := fmt.Sprintf("iss-%d", s.subIDCounter.Add(1))
+	ch := make(chan *rulesv1.StreamIssuanceRulesResponse, 64)
+
+	s.mu.Lock()
+	s.issSubscribers[id] = ch
+	snapshot := s.buildIssSnapshot()
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		delete(s.issSubscribers, id)
 		s.mu.Unlock()
 	}()
 
@@ -293,6 +337,97 @@ func (s *RuleServer) RemoveVerificationRule(namespace, name string) {
 	s.mu.Unlock()
 }
 
+// UpdateIssuanceRules replaces all issuance rules and broadcasts a full snapshot.
+func (s *RuleServer) UpdateIssuanceRules(rules []controller.IssuanceRule) {
+	s.mu.Lock()
+	s.issuanceRules = rules
+	v := fmt.Sprintf("%d", s.issVersion.Add(1))
+	resp := &rulesv1.StreamIssuanceRulesResponse{
+		Update: &rulesv1.StreamIssuanceRulesResponse_Snapshot{
+			Snapshot: &rulesv1.IssuanceRulesSnapshot{
+				Rules: issuanceRulesToProto(rules),
+			},
+		},
+		VersionInfo: v,
+	}
+	for _, ch := range s.issSubscribers {
+		select {
+		case ch <- resp:
+		default:
+		}
+	}
+	s.mu.Unlock()
+}
+
+// UpsertIssuanceRule adds or updates a single issuance rule and broadcasts a delta.
+// Rules are keyed by (PolicyNamespace, PolicyName, RuleName).
+func (s *RuleServer) UpsertIssuanceRule(rule controller.IssuanceRule) {
+	s.mu.Lock()
+	found := false
+	for i, r := range s.issuanceRules {
+		if r.PolicyNamespace == rule.PolicyNamespace &&
+			r.PolicyName == rule.PolicyName &&
+			r.RuleName == rule.RuleName {
+			s.issuanceRules[i] = rule
+			found = true
+			break
+		}
+	}
+	if !found {
+		s.issuanceRules = append(s.issuanceRules, rule)
+	}
+
+	v := fmt.Sprintf("%d", s.issVersion.Add(1))
+	resp := &rulesv1.StreamIssuanceRulesResponse{
+		Update: &rulesv1.StreamIssuanceRulesResponse_Delta{
+			Delta: &rulesv1.IssuanceRulesDelta{
+				Upserted: issuanceRulesToProto([]controller.IssuanceRule{rule}),
+			},
+		},
+		VersionInfo: v,
+	}
+	for _, ch := range s.issSubscribers {
+		select {
+		case ch <- resp:
+		default:
+		}
+	}
+	s.mu.Unlock()
+}
+
+// RemoveIssuanceRule removes all issuance rules sourced from the given
+// TokenPolicy (identified by namespace + name) and broadcasts a delta. The
+// RuleRef.Name carries the policy name; the entire policy's rule set is dropped
+// in one delta, mirroring how reconciliation re-pushes the full set on update.
+func (s *RuleServer) RemoveIssuanceRule(policyNamespace, policyName string) {
+	s.mu.Lock()
+	out := s.issuanceRules[:0]
+	for _, r := range s.issuanceRules {
+		if r.PolicyNamespace == policyNamespace && r.PolicyName == policyName {
+			continue
+		}
+		out = append(out, r)
+	}
+	s.issuanceRules = out
+
+	v := fmt.Sprintf("%d", s.issVersion.Add(1))
+	resp := &rulesv1.StreamIssuanceRulesResponse{
+		Update: &rulesv1.StreamIssuanceRulesResponse_Delta{
+			Delta: &rulesv1.IssuanceRulesDelta{
+				Removed: []*rulesv1.RuleRef{{Namespace: policyNamespace, Name: policyName}},
+			},
+		},
+		VersionInfo: v,
+	}
+	for _, ch := range s.issSubscribers {
+		select {
+		case ch <- resp:
+		default:
+		}
+	}
+	s.mu.Unlock()
+}
+
 // buildGenSnapshot returns a full generation rules snapshot response. Must be called under s.mu.
 func (s *RuleServer) buildGenSnapshot() *rulesv1.StreamGenerationRulesResponse {
 	return &rulesv1.StreamGenerationRulesResponse{
@@ -314,6 +449,18 @@ func (s *RuleServer) buildVerSnapshot() *rulesv1.StreamVerificationRulesResponse
 			},
 		},
 		VersionInfo: fmt.Sprintf("%d", s.verVersion.Load()),
+	}
+}
+
+// buildIssSnapshot returns a full issuance rules snapshot response. Must be called under s.mu.
+func (s *RuleServer) buildIssSnapshot() *rulesv1.StreamIssuanceRulesResponse {
+	return &rulesv1.StreamIssuanceRulesResponse{
+		Update: &rulesv1.StreamIssuanceRulesResponse_Snapshot{
+			Snapshot: &rulesv1.IssuanceRulesSnapshot{
+				Rules: issuanceRulesToProto(s.issuanceRules),
+			},
+		},
+		VersionInfo: fmt.Sprintf("%d", s.issVersion.Load()),
 	}
 }
 
@@ -401,5 +548,24 @@ func endpointToProto(e *v1alpha1.EndpointSpec) *rulesv1.EndpointSpec {
 	return &rulesv1.EndpointSpec{
 		Path:   e.Path,
 		Method: e.Method,
+	}
+}
+
+func issuanceRulesToProto(rules []controller.IssuanceRule) []*rulesv1.IssuanceRule {
+	out := make([]*rulesv1.IssuanceRule, len(rules))
+	for i := range rules {
+		out[i] = issuanceRuleToProto(&rules[i])
+	}
+	return out
+}
+
+func issuanceRuleToProto(r *controller.IssuanceRule) *rulesv1.IssuanceRule {
+	return &rulesv1.IssuanceRule{
+		PolicyNamespace:  r.PolicyNamespace,
+		PolicyName:       r.PolicyName,
+		RuleName:         r.RuleName,
+		Cel:              r.CEL,
+		Message:          r.Message,
+		TargetNamespaces: append([]string(nil), r.TargetNamespaces...),
 	}
 }

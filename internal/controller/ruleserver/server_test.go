@@ -518,3 +518,124 @@ func TestStreamGenerationRules_ConcurrentUpdates(t *testing.T) {
 		}
 	}
 }
+
+// recvIssResponse reads a single issuance response with a timeout.
+func recvIssResponse(t *testing.T, stream rulesv1.RuleDiscoveryService_StreamIssuanceRulesClient, timeout time.Duration) *rulesv1.StreamIssuanceRulesResponse {
+	t.Helper()
+	type result struct {
+		resp *rulesv1.StreamIssuanceRulesResponse
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		resp, err := stream.Recv()
+		ch <- result{resp, err}
+	}()
+	select {
+	case r := <-ch:
+		require.NoError(t, r.err)
+		return r.resp
+	case <-time.After(timeout):
+		t.Fatal("timed out waiting for issuance rules response")
+		return nil
+	}
+}
+
+func TestStreamIssuanceRules_InitialSnapshot(t *testing.T) {
+	rs, conn, cleanup := startTestServer(t)
+	defer cleanup()
+
+	rs.UpdateIssuanceRules([]controller.IssuanceRule{
+		{
+			PolicyName:       "default",
+			RuleName:         "no-admin-all",
+			CEL:              "!('admin:all' in scope.split(' '))",
+			Message:          "admin:all scope is forbidden",
+			TargetNamespaces: []string{"team-alpha"},
+		},
+	})
+
+	client := rulesv1.NewRuleDiscoveryServiceClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	stream, err := client.StreamIssuanceRules(ctx)
+	require.NoError(t, err)
+	require.NoError(t, stream.Send(&rulesv1.StreamIssuanceRulesRequest{}))
+
+	resp := recvIssResponse(t, stream, 3*time.Second)
+	require.NotNil(t, resp.GetSnapshot())
+	require.Len(t, resp.GetSnapshot().GetRules(), 1)
+	rule := resp.GetSnapshot().GetRules()[0]
+	assert.Equal(t, "default", rule.GetPolicyName())
+	assert.Equal(t, "no-admin-all", rule.GetRuleName())
+	assert.Equal(t, "admin:all scope is forbidden", rule.GetMessage())
+	assert.Equal(t, []string{"team-alpha"}, rule.GetTargetNamespaces())
+	assert.NotEmpty(t, resp.GetVersionInfo())
+}
+
+func TestStreamIssuanceRules_EmptyInitialSnapshot(t *testing.T) {
+	_, conn, cleanup := startTestServer(t)
+	defer cleanup()
+
+	client := rulesv1.NewRuleDiscoveryServiceClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	stream, err := client.StreamIssuanceRules(ctx)
+	require.NoError(t, err)
+	require.NoError(t, stream.Send(&rulesv1.StreamIssuanceRulesRequest{}))
+
+	resp := recvIssResponse(t, stream, 3*time.Second)
+	require.NotNil(t, resp.GetSnapshot())
+	assert.Empty(t, resp.GetSnapshot().GetRules())
+}
+
+func TestStreamIssuanceRules_UpsertAndRemove(t *testing.T) {
+	rs, conn, cleanup := startTestServer(t)
+	defer cleanup()
+
+	client := rulesv1.NewRuleDiscoveryServiceClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	stream, err := client.StreamIssuanceRules(ctx)
+	require.NoError(t, err)
+	require.NoError(t, stream.Send(&rulesv1.StreamIssuanceRulesRequest{}))
+	_ = recvIssResponse(t, stream, 3*time.Second)
+
+	rs.UpsertIssuanceRule(controller.IssuanceRule{
+		PolicyName: "p1", RuleName: "r1", CEL: "true", Message: "msg",
+	})
+	resp := recvIssResponse(t, stream, 3*time.Second)
+	require.NotNil(t, resp.GetDelta())
+	require.Len(t, resp.GetDelta().GetUpserted(), 1)
+	assert.Equal(t, "r1", resp.GetDelta().GetUpserted()[0].GetRuleName())
+
+	// Upsert again with same key replaces, not appends.
+	rs.UpsertIssuanceRule(controller.IssuanceRule{
+		PolicyName: "p1", RuleName: "r1", CEL: "true", Message: "msg-v2",
+	})
+	resp = recvIssResponse(t, stream, 3*time.Second)
+	require.Len(t, resp.GetDelta().GetUpserted(), 1)
+	assert.Equal(t, "msg-v2", resp.GetDelta().GetUpserted()[0].GetMessage())
+
+	// RemoveIssuanceRule drops all rules sourced from the given policy.
+	rs.UpsertIssuanceRule(controller.IssuanceRule{
+		PolicyName: "p1", RuleName: "r2", CEL: "true", Message: "msg2",
+	})
+	_ = recvIssResponse(t, stream, 3*time.Second)
+
+	rs.RemoveIssuanceRule("", "p1")
+	resp = recvIssResponse(t, stream, 3*time.Second)
+	require.NotNil(t, resp.GetDelta())
+	require.Len(t, resp.GetDelta().GetRemoved(), 1)
+	assert.Equal(t, "p1", resp.GetDelta().GetRemoved()[0].GetName())
+
+	// After removal, full snapshot to a fresh client should be empty.
+	stream2, err := client.StreamIssuanceRules(ctx)
+	require.NoError(t, err)
+	require.NoError(t, stream2.Send(&rulesv1.StreamIssuanceRulesRequest{}))
+	resp = recvIssResponse(t, stream2, 3*time.Second)
+	assert.Empty(t, resp.GetSnapshot().GetRules())
+}

@@ -244,3 +244,58 @@ func TestScopeContains(t *testing.T) {
 	assert.False(t, ScopeContains("", "read:data"))
 	assert.True(t, ScopeContains("single-scope", "single-scope"))
 }
+
+// TestRuleAppliesToNamespace_EmptyWorkloadNS verifies that a request with no
+// identified workload namespace never matches a targeted rule, even when a
+// misconfigured policy includes an empty string in matchNames. This locks
+// the safety guard against silent namespace-scoped rule activation when the
+// caller's namespace is unknown.
+func TestRuleAppliesToNamespace_EmptyWorkloadNS(t *testing.T) {
+	cases := []struct {
+		name    string
+		targets []string
+		want    bool
+	}{
+		{"empty-targets-cluster-wide", nil, true},
+		{"named-targets-only", []string{"team-alpha", "team-beta"}, false},
+		{"targets-include-empty-string", []string{"team-alpha", ""}, false},
+		{"targets-only-empty-string", []string{""}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, ruleAppliesToNamespace(tc.targets, ""))
+		})
+	}
+}
+
+func TestEvaluateIssuanceRules_NamespaceFiltering(t *testing.T) {
+	// Two rules: one targets team-alpha (would always deny), one is cluster-wide.
+	rules, err := CompileIssuanceRules([]IssuanceRuleConfig{
+		{
+			Name:             "alpha-only-deny",
+			CEL:              "false",
+			Message:          "always deny for team-alpha",
+			TargetNamespaces: []string{"team-alpha"},
+		},
+		{
+			Name:    "cluster-wide-allow",
+			CEL:     "true",
+			Message: "always allow",
+		},
+	})
+	require.NoError(t, err)
+
+	// Request from team-alpha: targeted rule applies, must deny.
+	err = EvaluateIssuanceRules(rules, &IssuanceContext{Subject: "user", WorkloadNS: "team-alpha"})
+	require.Error(t, err)
+	assert.IsType(t, &IssuanceDeniedError{}, err)
+
+	// Request from team-beta: only the cluster-wide rule applies, no denial.
+	err = EvaluateIssuanceRules(rules, &IssuanceContext{Subject: "user", WorkloadNS: "team-beta"})
+	assert.NoError(t, err)
+
+	// Request with no WorkloadNS (e.g. unauthenticated context): targeted rules
+	// must NOT apply (don't accidentally trip on missing context).
+	err = EvaluateIssuanceRules(rules, &IssuanceContext{Subject: "user", WorkloadNS: ""})
+	assert.NoError(t, err)
+}

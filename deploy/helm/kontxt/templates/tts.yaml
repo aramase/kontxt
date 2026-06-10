@@ -34,6 +34,7 @@ spec:
           args:
             - --config=/etc/kontxt/config.yaml
             - --addr=:{{ .Values.tts.port }}
+            - --controller-addr=kontxt-controller.{{ .Values.namespace }}.svc.cluster.local:9090
           ports:
             - containerPort: {{ .Values.tts.port }}
               name: http
@@ -46,7 +47,7 @@ spec:
             periodSeconds: 10
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /readyz
               port: http
             initialDelaySeconds: 3
             periodSeconds: 5

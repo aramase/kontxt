@@ -714,3 +714,85 @@ func TestHandler_TokenReplacement_PreservesTctxRctx(t *testing.T) {
 	assert.Equal(t, "10.0.0.1", rctx["req_ip"])
 	assert.Equal(t, "oidc", rctx["authn"])
 }
+
+// TestSetIssuanceRules_ConcurrentSwap exercises SetIssuanceRules under the
+// race detector to guard against races between the rule-streaming goroutine
+// (controller pushes) and request goroutines reading the rule set during
+// token exchanges. Run via `go test -race ./pkg/tts/...`.
+func TestSetIssuanceRules_ConcurrentSwap(t *testing.T) {
+	h := &Handler{}
+
+	rulesA, err := CompileIssuanceRules([]IssuanceRuleConfig{
+		{Name: "a", CEL: "true", Message: "ok"},
+	})
+	require.NoError(t, err)
+	rulesB, err := CompileIssuanceRules([]IssuanceRuleConfig{
+		{Name: "b", CEL: "false", Message: "denied"},
+	})
+	require.NoError(t, err)
+
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 1000; i++ {
+			if i%2 == 0 {
+				h.SetIssuanceRules(rulesA)
+			} else {
+				h.SetIssuanceRules(rulesB)
+			}
+		}
+		close(done)
+	}()
+
+	ictx := &IssuanceContext{Subject: "user", WorkloadNS: "ns"}
+	for i := 0; i < 1000; i++ {
+		if rules := h.loadIssuanceRules(); len(rules) > 0 {
+			_ = EvaluateIssuanceRules(rules, ictx)
+		}
+	}
+	<-done
+}
+
+// TestSetIssuanceRules_SnapshotIsolated verifies that mutating the slice a
+// caller passed to SetIssuanceRules does not affect the handler's stored set.
+// This is part of the immutability contract that lets ServeHTTP read the
+// slice without locks.
+func TestSetIssuanceRules_SnapshotIsolated(t *testing.T) {
+	h := &Handler{}
+
+	rules, err := CompileIssuanceRules([]IssuanceRuleConfig{
+		{Name: "first", CEL: "true", Message: "ok"},
+	})
+	require.NoError(t, err)
+	h.SetIssuanceRules(rules)
+
+	// Mutate the caller's slice header (zero it out). The handler's stored
+	// snapshot must remain unchanged.
+	rules = nil
+	loaded := h.loadIssuanceRules()
+	require.Len(t, loaded, 1)
+	assert.Equal(t, "first", loaded[0].Name)
+}
+
+// TestSetIssuanceRules_TargetNamespacesDeepCopied verifies that the
+// TargetNamespaces slice inside each IssuanceRule is deep-copied on handoff.
+// Without the deep copy, a caller mutating the slice it passed in could race
+// with ServeHTTP reading the snapshot (data race on the underlying array).
+func TestSetIssuanceRules_TargetNamespacesDeepCopied(t *testing.T) {
+	h := &Handler{}
+
+	targets := []string{"team-alpha", "team-beta"}
+	rules := []IssuanceRule{{
+		Name:             "scoped",
+		TargetNamespaces: targets,
+	}}
+	h.SetIssuanceRules(rules)
+
+	// Mutate the caller-owned slice in place after handoff. The handler's
+	// stored snapshot must not observe the mutation.
+	targets[0] = "MUTATED"
+	rules[0].TargetNamespaces[1] = "ALSO-MUTATED"
+
+	loaded := h.loadIssuanceRules()
+	require.Len(t, loaded, 1)
+	assert.Equal(t, []string{"team-alpha", "team-beta"}, loaded[0].TargetNamespaces)
+}

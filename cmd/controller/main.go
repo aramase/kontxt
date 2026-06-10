@@ -90,6 +90,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := (&controller.TokenPolicyReconciler{
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		IssuancePublisher: rs,
+	}).SetupWithManager(mgr); err != nil {
+		fmt.Fprintf(os.Stderr, "unable to create TokenPolicy controller: %v\n", err)
+		os.Exit(1)
+	}
+
 	fmt.Println("Starting kontxt controller manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		fmt.Fprintf(os.Stderr, "controller manager exited with error: %v\n", err)

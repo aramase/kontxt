@@ -14,6 +14,12 @@ service RuleDiscoveryService {
   // StreamVerificationRules streams verification rules (from ServiceTokenRequirement CRDs)
   // to ext-auth instances running in verification mode.
   rpc StreamVerificationRules(stream StreamVerificationRulesRequest) returns (stream StreamVerificationRulesResponse);
+
+  // StreamIssuanceRules streams issuance rules (from TokenPolicy CRDs) to the
+  // TTS. Rules are pre-resolved by the controller for the requesting workload's
+  // namespace: each rule carries the namespace it applies to, and the TTS
+  // evaluates the union of matching rules conjunctively at exchange time.
+  rpc StreamIssuanceRules(stream StreamIssuanceRulesRequest) returns (stream StreamIssuanceRulesResponse);
 }
 
 // StreamGenerationRulesRequest is sent by the client to acknowledge received updates.
@@ -69,6 +75,32 @@ message VerificationRulesSnapshot {
 // VerificationRulesDelta contains incremental changes to verification rules.
 message VerificationRulesDelta {
   repeated VerificationRule upserted = 1;
+  repeated RuleRef removed = 2;
+}
+
+// StreamIssuanceRulesRequest is sent by the client to acknowledge received updates.
+message StreamIssuanceRulesRequest {
+  // version_info is the version most recently received by the client.
+  string version_info = 1;
+}
+
+// StreamIssuanceRulesResponse carries an issuance rules update.
+message StreamIssuanceRulesResponse {
+  oneof update {
+    IssuanceRulesSnapshot snapshot = 1;
+    IssuanceRulesDelta delta = 2;
+  }
+  string version_info = 3;
+}
+
+// IssuanceRulesSnapshot is a complete set of issuance rules.
+message IssuanceRulesSnapshot {
+  repeated IssuanceRule rules = 1;
+}
+
+// IssuanceRulesDelta contains incremental changes to issuance rules.
+message IssuanceRulesDelta {
+  repeated IssuanceRule upserted = 1;
   repeated RuleRef removed = 2;
 }
 
@@ -130,4 +162,19 @@ message CELRule {
   string name = 1;
   string cel = 2;
   string message = 3;
+}
+
+// IssuanceRule is a compiled CEL rule pushed to the TTS, pre-resolved by the
+// controller to the namespaces it applies to. Mirrors controller.IssuanceRule.
+message IssuanceRule {
+  // namespace and name identify the source TokenPolicy that produced this rule.
+  string policy_namespace = 1;
+  string policy_name = 2;
+  // rule_name is the name of the rule inside the TokenPolicy.
+  string rule_name = 3;
+  string cel = 4;
+  string message = 5;
+  // target_namespaces lists the workload namespaces this rule applies to.
+  // Empty means cluster-wide (all namespaces).
+  repeated string target_namespaces = 6;
 }

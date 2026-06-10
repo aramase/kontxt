@@ -13,6 +13,9 @@ type IssuanceRule struct {
 	Name    string
 	program cel.Program
 	message string
+	// TargetNamespaces lists the workload namespaces this rule applies to.
+	// Empty means cluster-wide (matches all namespaces).
+	TargetNamespaces []string
 }
 
 // IssuanceRuleConfig is the configuration for an issuance rule (from TokenPolicy).
@@ -20,6 +23,9 @@ type IssuanceRuleConfig struct {
 	Name    string `json:"name" yaml:"name"`
 	CEL     string `json:"cel" yaml:"cel"`
 	Message string `json:"message" yaml:"message"`
+	// TargetNamespaces, when non-empty, restricts this rule to specific
+	// workload namespaces. Empty means cluster-wide.
+	TargetNamespaces []string `json:"targetNamespaces,omitempty" yaml:"targetNamespaces,omitempty"`
 }
 
 // IssuanceContext contains the variables available to CEL issuance rules.
@@ -77,9 +83,10 @@ func CompileIssuanceRules(configs []IssuanceRuleConfig) ([]IssuanceRule, error) 
 		}
 
 		rules = append(rules, IssuanceRule{
-			Name:    cfg.Name,
-			program: prg,
-			message: cfg.Message,
+			Name:             cfg.Name,
+			program:          prg,
+			message:          cfg.Message,
+			TargetNamespaces: append([]string(nil), cfg.TargetNamespaces...),
 		})
 	}
 
@@ -112,6 +119,12 @@ func EvaluateIssuanceRules(rules []IssuanceRule, ictx *IssuanceContext) error {
 	}
 
 	for _, rule := range rules {
+		// Skip rules that target a different namespace. Empty TargetNamespaces
+		// means cluster-wide so the rule always applies.
+		if !ruleAppliesToNamespace(rule.TargetNamespaces, ictx.WorkloadNS) {
+			continue
+		}
+
 		out, _, err := rule.program.Eval(activation)
 		if err != nil {
 			return fmt.Errorf("evaluating issuance rule %q: %w", rule.Name, err)
@@ -130,6 +143,27 @@ func EvaluateIssuanceRules(rules []IssuanceRule, ictx *IssuanceContext) error {
 	}
 
 	return nil
+}
+
+// ruleAppliesToNamespace returns true if the rule should be evaluated for a
+// request originating in workloadNS. An empty targets list means cluster-wide.
+// A request with no identified workload namespace (workloadNS == "") never
+// matches a targeted rule, even if a misconfigured policy happens to include
+// an empty string in matchNames: namespace-scoped rules must not silently fire
+// without a known namespace.
+func ruleAppliesToNamespace(targets []string, workloadNS string) bool {
+	if len(targets) == 0 {
+		return true
+	}
+	if workloadNS == "" {
+		return false
+	}
+	for _, t := range targets {
+		if t == workloadNS {
+			return true
+		}
+	}
+	return false
 }
 
 // IssuanceDeniedError is returned when an issuance rule evaluates to false.

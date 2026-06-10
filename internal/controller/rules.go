@@ -56,6 +56,24 @@ type CELRule struct {
 	Message string `json:"message"`
 }
 
+// IssuanceRule is a CEL rule pushed to the TTS, pre-resolved by the controller
+// to the workload namespaces it applies to. Sourced from TokenPolicy CRDs.
+type IssuanceRule struct {
+	// PolicyNamespace + PolicyName identify the source TokenPolicy.
+	// TokenPolicy is cluster-scoped so PolicyNamespace is always empty, but it
+	// is kept for symmetry with GenerationRule/VerificationRule and to leave
+	// room for future namespaced policy CRDs.
+	PolicyNamespace string `json:"policyNamespace,omitempty"`
+	PolicyName      string `json:"policyName"`
+	// RuleName is the name of the rule within the TokenPolicy.
+	RuleName string `json:"ruleName"`
+	CEL      string `json:"cel"`
+	Message  string `json:"message"`
+	// TargetNamespaces lists the workload namespaces this rule applies to.
+	// Empty means cluster-wide (matches all namespaces).
+	TargetNamespaces []string `json:"targetNamespaces,omitempty"`
+}
+
 // ValidateTransactionTypeAgainstPolicy checks a TransactionType against a TokenPolicy.
 // Returns a list of violations (empty if compliant).
 func ValidateTransactionTypeAgainstPolicy(tt *v1alpha1.TransactionType, policy *v1alpha1.TokenPolicy) []string {
