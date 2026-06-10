@@ -1,6 +1,10 @@
-.PHONY: all build test test-e2e test-agents-e2e test-agents-istio-e2e lint clean docker helm generate generate-proto manifests verify-codegen helm-package helm-push
+.PHONY: all build test test-e2e test-agents-e2e test-agents-istio-e2e lint clean docker helm generate generate-proto manifests verify-codegen helm-package helm-push protoc-gen-go protoc-gen-go-grpc
 
 CONTROLLER_GEN ?= $(shell which controller-gen)
+
+LOCALBIN ?= $(CURDIR)/bin
+PROTOC_GEN_GO ?= $(LOCALBIN)/protoc-gen-go
+PROTOC_GEN_GO_GRPC ?= $(LOCALBIN)/protoc-gen-go-grpc
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 GIT_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
@@ -64,9 +68,24 @@ lint:
 generate: ## Generate DeepCopy methods
 	$(CONTROLLER_GEN) object paths=./api/...
 
-generate-proto: ## Generate Go code from proto definitions
-	buf generate
-	buf lint
+generate-proto: protoc-gen-go protoc-gen-go-grpc ## Generate Go code from proto definitions
+	PATH="$(LOCALBIN):$$PATH" buf generate
+	PATH="$(LOCALBIN):$$PATH" buf lint
+
+# Install the protoc-gen-go and protoc-gen-go-grpc binaries pinned in go.mod
+# into $(LOCALBIN). hack/tools.go blank-imports both packages so `go install`
+# resolves them at the module's pinned versions, giving deterministic
+# regeneration regardless of what's on the developer's PATH.
+$(LOCALBIN):
+	mkdir -p $(LOCALBIN)
+
+protoc-gen-go: $(PROTOC_GEN_GO) ## Install pinned protoc-gen-go into ./bin
+$(PROTOC_GEN_GO): | $(LOCALBIN)
+	GOBIN=$(LOCALBIN) go install google.golang.org/protobuf/cmd/protoc-gen-go
+
+protoc-gen-go-grpc: $(PROTOC_GEN_GO_GRPC) ## Install pinned protoc-gen-go-grpc into ./bin
+$(PROTOC_GEN_GO_GRPC): | $(LOCALBIN)
+	GOBIN=$(LOCALBIN) go install google.golang.org/grpc/cmd/protoc-gen-go-grpc
 
 manifests: ## Generate CRD and RBAC manifests
 	$(CONTROLLER_GEN) crd paths=./api/... output:crd:dir=config/crd/bases
