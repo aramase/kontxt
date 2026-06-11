@@ -225,3 +225,55 @@ func TestValidateCELRules_EmptyExpression(t *testing.T) {
 	require.Len(t, errs, 1)
 	assert.Contains(t, errs[0], "empty CEL")
 }
+
+func TestValidateCELRules_SyntaxError(t *testing.T) {
+	rules := []v1alpha1.VerificationRule{
+		{Name: "bad", CEL: "this is not cel ((", Message: "msg"},
+	}
+	errs := validateCELRules(rules)
+	require.NotEmpty(t, errs)
+	assert.Contains(t, errs[0], `compiling verification rule "bad"`)
+}
+
+func TestValidateCELRules_NonBoolExpression(t *testing.T) {
+	rules := []v1alpha1.VerificationRule{
+		{Name: "int-rule", CEL: "1 + 1", Message: "msg"},
+	}
+	errs := validateCELRules(rules)
+	require.NotEmpty(t, errs)
+	assert.Contains(t, errs[0], "must return bool")
+}
+
+func TestValidateCELRules_UnknownVariable(t *testing.T) {
+	rules := []v1alpha1.VerificationRule{
+		{Name: "bad-var", CEL: `claims.scope == "x"`, Message: "msg"}, // should be `txtoken`, not `claims`
+	}
+	errs := validateCELRules(rules)
+	require.NotEmpty(t, errs)
+}
+
+func TestValidateCELRules_EmptyInput(t *testing.T) {
+	errs := validateCELRules(nil)
+	assert.Empty(t, errs)
+}
+
+func TestValidateAndCompileCELRules_FiltersInvalid(t *testing.T) {
+	// rebuildVerificationRules relies on the filtered slice to keep invalid
+	// CEL out of the published rule set. Verify the partitioning: valid
+	// rules pass through; invalid ones surface as error strings and are
+	// excluded from the returned slice.
+	rules := []v1alpha1.VerificationRule{
+		{Name: "good1", CEL: `txtoken.scope == "read"`, Message: "ok"},
+		{Name: "syntax", CEL: `this is not cel ((`, Message: "x"},
+		{Name: "good2", CEL: `request.method == "GET"`, Message: "ok"},
+		{Name: "empty", CEL: ``, Message: "x"},
+		{Name: "non-bool", CEL: `1 + 1`, Message: "x"},
+	}
+
+	valid, errs := validateAndCompileCELRules(rules)
+
+	require.Len(t, valid, 2)
+	assert.Equal(t, "good1", valid[0].Name)
+	assert.Equal(t, "good2", valid[1].Name)
+	require.Len(t, errs, 3)
+}

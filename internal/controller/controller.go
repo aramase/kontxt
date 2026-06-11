@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/aramase/kontxt/api/v1alpha1"
+	"github.com/aramase/kontxt/pkg/extauth/celverify"
 )
 
 const (
@@ -227,8 +228,9 @@ func (r *ServiceTokenRequirementReconciler) rebuildVerificationRules(ctx context
 
 	rules := make([]VerificationRule, 0, len(strList.Items))
 	for _, str := range strList.Items {
-		celRules := make([]CELRule, 0, len(str.Spec.Verification.Rules))
-		for _, r := range str.Spec.Verification.Rules {
+		validCEL, _ := validateAndCompileCELRules(str.Spec.Verification.Rules)
+		celRules := make([]CELRule, 0, len(validCEL))
+		for _, r := range validCEL {
 			celRules = append(celRules, CELRule{
 				Name:    r.Name,
 				CEL:     r.CEL,
@@ -260,15 +262,44 @@ func (r *ServiceTokenRequirementReconciler) SetupWithManager(mgr ctrl.Manager) e
 		Complete(r)
 }
 
-// validateCELRules does a basic syntax check on CEL expressions.
-// In a full implementation, this would compile the expressions.
-func validateCELRules(rules []v1alpha1.VerificationRule) []string {
-	var errs []string
+// validateAndCompileCELRules partitions the input into rules whose CEL
+// compiles cleanly under the same environment the ext-auth server uses and
+// rules that don't. It is the single source of truth for "does this CEL
+// expression belong in the published rule set?": Reconcile uses the error
+// strings to set ConditionReady, and rebuildVerificationRules uses the valid
+// subset to filter what it publishes — so invalid CEL never reaches the
+// runtime under normal operation. The runtime's own compile step
+// (pkg/extauth/server.go) is defensive-only: any expression that still fails
+// there is logged and skipped, but the owning rule's non-CEL constraints
+// (RequiredScope, RequiredTctxFields) stay in force so version skew between
+// controller and ext-auth cannot fail-open.
+func validateAndCompileCELRules(rules []v1alpha1.VerificationRule) ([]v1alpha1.VerificationRule, []string) {
+	if len(rules) == 0 {
+		return nil, nil
+	}
+	var (
+		valid []v1alpha1.VerificationRule
+		errs  []string
+	)
 	for _, rule := range rules {
 		if rule.CEL == "" {
 			errs = append(errs, fmt.Sprintf("rule %q has empty CEL expression", rule.Name))
+			continue
 		}
+		if _, err := celverify.Compile([]celverify.Rule{{Name: rule.Name, CEL: rule.CEL, Message: rule.Message}}); err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+		valid = append(valid, rule)
 	}
+	return valid, errs
+}
+
+// validateCELRules returns the error strings produced by
+// validateAndCompileCELRules. Kept as a thin shim so Reconcile() can read
+// errors without caring about the filtered subset.
+func validateCELRules(rules []v1alpha1.VerificationRule) []string {
+	_, errs := validateAndCompileCELRules(rules)
 	return errs
 }
 
