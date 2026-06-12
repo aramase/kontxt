@@ -3,24 +3,16 @@ package extauth
 import (
 	"fmt"
 	"strings"
-	"sync"
-
-	corev1 "k8s.io/api/core/v1"
 )
 
-// IdentityResolver resolves the source workload identity from the ext_authz CheckRequest.
-// In Istio ambient mode, it parses the SPIFFE principal from source.principal.
-// In standalone mode, it resolves the source pod IP to a service account via an informer cache.
-type IdentityResolver struct {
-	mu   sync.RWMutex
-	pods map[string]*podInfo // pod IP → pod info
-}
-
-type podInfo struct {
-	Name           string
-	Namespace      string
-	ServiceAccount string
-}
+// IdentityResolver resolves the source workload identity from the ext_authz
+// CheckRequest. kontxt requires a cryptographically authenticated SPIFFE
+// principal on internal traffic (typically supplied by an Istio ambient mesh
+// via ztunnel mTLS). There is intentionally no pod-IP fallback: pod IP is
+// unauthenticated, spoofable from pods with CAP_NET_RAW or hostNetwork, racy
+// across IP recycle, and absent under CNI SNAT or for host-network pods, so
+// it is not a sound primitive to gate token issuance on.
+type IdentityResolver struct{}
 
 // WorkloadIdentity represents a resolved workload identity.
 type WorkloadIdentity struct {
@@ -34,9 +26,7 @@ type WorkloadIdentity struct {
 
 // NewIdentityResolver creates a new identity resolver.
 func NewIdentityResolver() *IdentityResolver {
-	return &IdentityResolver{
-		pods: make(map[string]*podInfo),
-	}
+	return &IdentityResolver{}
 }
 
 // ResolveFromPrincipal extracts the workload identity from a SPIFFE principal URI.
@@ -75,76 +65,13 @@ func (r *IdentityResolver) ResolveFromPrincipal(principal string) (*WorkloadIden
 	}, nil
 }
 
-// ResolveFromPodIP resolves a workload identity from a pod IP address
-// using the local informer cache.
-func (r *IdentityResolver) ResolveFromPodIP(podIP string) (*WorkloadIdentity, error) {
-	if podIP == "" {
-		return nil, fmt.Errorf("empty pod IP")
+// Resolve returns the workload identity for an internal request. A SPIFFE
+// principal is required; if it is missing the request is treated as
+// unauthenticated so the caller fails closed rather than issuing a TxToken
+// against a weak identity primitive.
+func (r *IdentityResolver) Resolve(principal string) (*WorkloadIdentity, error) {
+	if principal == "" {
+		return nil, fmt.Errorf("no SPIFFE principal on internal request (ambient mesh required)")
 	}
-
-	// Strip port if present (e.g., "10.0.0.42:8080" → "10.0.0.42")
-	if idx := strings.LastIndex(podIP, ":"); idx > 0 {
-		// Check if it's an IPv6 address
-		if !strings.Contains(podIP, "]") {
-			podIP = podIP[:idx]
-		}
-	}
-
-	r.mu.RLock()
-	info, found := r.pods[podIP]
-	r.mu.RUnlock()
-
-	if !found {
-		return nil, fmt.Errorf("pod with IP %s not found in cache", podIP)
-	}
-
-	return &WorkloadIdentity{
-		Subject:        fmt.Sprintf("system:serviceaccount:%s:%s", info.Namespace, info.ServiceAccount),
-		Namespace:      info.Namespace,
-		ServiceAccount: info.ServiceAccount,
-	}, nil
-}
-
-// UpdatePod adds or updates a pod in the informer cache.
-func (r *IdentityResolver) UpdatePod(pod *corev1.Pod) {
-	if pod.Status.PodIP == "" {
-		return
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	r.pods[pod.Status.PodIP] = &podInfo{
-		Name:           pod.Name,
-		Namespace:      pod.Namespace,
-		ServiceAccount: pod.Spec.ServiceAccountName,
-	}
-}
-
-// DeletePod removes a pod from the informer cache.
-func (r *IdentityResolver) DeletePod(pod *corev1.Pod) {
-	if pod.Status.PodIP == "" {
-		return
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.pods, pod.Status.PodIP)
-}
-
-// Resolve attempts to resolve a workload identity using all available information.
-// It tries SPIFFE principal first (cryptographically authenticated), then falls back
-// to pod IP resolution (network-level identity).
-func (r *IdentityResolver) Resolve(principal, sourceIP string) (*WorkloadIdentity, error) {
-	// Prefer SPIFFE principal (cryptographically authenticated in ambient mode)
-	if principal != "" {
-		return r.ResolveFromPrincipal(principal)
-	}
-
-	// Fall back to pod IP resolution (standalone mode)
-	if sourceIP != "" {
-		return r.ResolveFromPodIP(sourceIP)
-	}
-
-	return nil, fmt.Errorf("no identity information available: both principal and source IP are empty")
+	return r.ResolveFromPrincipal(principal)
 }

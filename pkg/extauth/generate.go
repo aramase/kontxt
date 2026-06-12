@@ -74,19 +74,12 @@ func (s *GenerationServer) Check(ctx context.Context, req *authv3.CheckRequest) 
 		subjectToken = strings.TrimPrefix(authHeader, "Bearer ")
 		subjectTokenType = token.SubjectTokenTypeAccessToken
 	} else {
-		// Internal traffic: resolve identity from CheckRequest metadata
-		principal := ""
-		sourceIP := ""
-		if src := req.GetAttributes().GetSource(); src != nil {
-			principal = src.GetPrincipal()
-			if addr := src.GetAddress(); addr != nil {
-				if sa := addr.GetSocketAddress(); sa != nil {
-					sourceIP = sa.GetAddress()
-				}
-			}
-		}
+		// Internal traffic: resolve identity from the SPIFFE principal on the
+		// ext_authz peer (e.g. set by Istio ambient ztunnel mTLS). No pod-IP
+		// fallback: missing principal fails closed.
+		principal := req.GetAttributes().GetSource().GetPrincipal()
 
-		identity, err := s.identityResolver.Resolve(principal, sourceIP)
+		identity, err := s.identityResolver.Resolve(principal)
 		if err != nil {
 			return denied(codes.Unauthenticated, fmt.Sprintf("failed to resolve workload identity: %v", err)), nil
 		}
